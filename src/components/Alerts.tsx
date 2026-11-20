@@ -1,29 +1,56 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { DashboardState } from "@/lib/dashboard-types";
 import { price } from "./format";
 
 type Alert = { id: string; kind: "forming" | "entered"; title: string; body: string; side: "long" | "short"; at: number };
 const SEEN = "trendbot-alerts-seen";
 
-function beep(kind: Alert["kind"]) {
+// AudioContext unico, "destravado" no primeiro clique/tecla (regra dos navegadores)
+let audio: AudioContext | null = null;
+function ctxAudio(): AudioContext | null {
   try {
-    const ctx = new AudioContext();
-    const notes = kind === "entered" ? [660, 880, 1100] : [520, 700];
-    notes.forEach((f, i) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.frequency.value = f;
-      o.type = "sine";
-      g.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.16);
-      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + i * 0.16 + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.16 + 0.15);
-      o.connect(g).connect(ctx.destination);
-      o.start(ctx.currentTime + i * 0.16);
-      o.stop(ctx.currentTime + i * 0.16 + 0.16);
-    });
+    audio = audio ?? new AudioContext();
+    if (audio.state === "suspended") void audio.resume();
+    return audio;
   } catch {
-    /* navegador sem audio liberado */
+    return null;
+  }
+}
+if (typeof window !== "undefined") {
+  const unlock = () => ctxAudio();
+  window.addEventListener("pointerdown", unlock, { once: true });
+  window.addEventListener("keydown", unlock, { once: true });
+}
+
+const SOUND = "trendbot-sound";
+export const soundOn = () => {
+  try {
+    return localStorage.getItem(SOUND) !== "off";
+  } catch {
+    return true;
+  }
+};
+
+/** Entrada: 3 notas subindo, tocadas 2x (alto e claro). Previa: 2 notas suaves. */
+export function beep(kind: "forming" | "entered" | "test") {
+  if (kind !== "test" && !soundOn()) return;
+  const ctx = ctxAudio();
+  if (!ctx) return;
+  const seq = kind === "forming" ? [[523, 0], [659, 0.18]] : [[660, 0], [880, 0.14], [1320, 0.28], [660, 0.6], [880, 0.74], [1320, 0.88]];
+  const vol = kind === "forming" ? 0.18 : 0.35;
+  const t0 = ctx.currentTime + 0.02;
+  for (const [f, dt] of seq) {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "triangle";
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0 + dt);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + dt + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.22);
+    o.connect(g).connect(ctx.destination);
+    o.start(t0 + dt);
+    o.stop(t0 + dt + 0.24);
   }
 }
 
@@ -72,7 +99,16 @@ function detect(state: DashboardState): Alert[] {
 export default function Alerts({ state }: { state: DashboardState }) {
   const [shown, setShown] = useState<Alert[]>([]);
   const [perm, setPerm] = useState<NotificationPermission | "unsupported">("default");
-  const first = useRef(true);
+  const [sound, setSound] = useState(true);
+  useEffect(() => setSound(soundOn()), []);
+  const toggleSound = () => {
+    const v = !sound;
+    setSound(v);
+    try {
+      localStorage.setItem(SOUND, v ? "on" : "off");
+    } catch {}
+    if (v) beep("test");
+  };
 
   useEffect(() => {
     setPerm(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
@@ -85,25 +121,26 @@ export default function Alerts({ state }: { state: DashboardState }) {
     } catch {}
     const fresh = detect(state).filter((a) => !seen.includes(a.id));
     if (!fresh.length) return;
-    // na primeira carga mostra, mas sem som (o navegador bloqueia audio sem interacao)
-    for (const a of fresh) {
-      if (!first.current) beep(a.kind);
-      notify(a);
-    }
-    first.current = false;
+    // entrada executada toca mais alto que a previa; um som por atualizacao
+    const kind = fresh.some((a) => a.kind === "entered") ? "entered" : "forming";
+    beep(kind);
+    for (const a of fresh) notify(a);
     setShown((s) => [...fresh, ...s].slice(0, 4));
     try {
       localStorage.setItem(SEEN, JSON.stringify([...fresh.map((a) => a.id), ...seen].slice(0, 200)));
     } catch {}
   }, [state]);
-  useEffect(() => {
-    first.current = false;
-  }, []);
 
   const dismiss = (id: string) => setShown((s) => s.filter((a) => a.id !== id));
 
   return (
     <>
+      <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+        <button onClick={toggleSound} className={`rounded-lg px-2.5 py-1 ring-1 transition ${sound ? "bg-emerald-500/10 text-emerald-200 ring-emerald-400/30" : "bg-white/5 text-slate-400 ring-white/10"}`} title="Som quando o bot entrar numa operação">
+          {sound ? "🔊 Som de entrada ligado" : "🔇 Som desligado"}
+        </button>
+        <button onClick={() => beep("test")} className="rounded-lg px-2.5 py-1 text-slate-400 ring-1 ring-white/10 hover:bg-white/5 hover:text-slate-200">▶ Testar som</button>
+      </div>
       {perm === "default" && (
         <button
           onClick={async () => setPerm(await Notification.requestPermission())}

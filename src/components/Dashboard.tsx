@@ -72,8 +72,18 @@ export default function Dashboard() {
 
   useEffect(() => {
     load();
+    let lastHidden = Date.now();
     const t = setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden) {
+        // aba em segundo plano: confere a cada ~60s pelo relogio (o navegador
+        // desacelera timers de abas ocultas), para o alerta e o som sairem na hora
+        if (Date.now() - lastHidden >= 60_000) {
+          lastHidden = Date.now();
+          load();
+        }
+        return;
+      }
+      lastHidden = Date.now();
       setLeft((l) => {
         if (l <= 1) {
           load();
