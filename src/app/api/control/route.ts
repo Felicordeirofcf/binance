@@ -27,6 +27,7 @@ type Body =
   | { action: "dca_sell_all" }
   | { action: "dca_sell_partial"; pct: number }
   | { action: "dca_reset_paper" }
+  | { action: "binance_check" }
   | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; side?: "long" | "short"; leverage?: number; confirm: string }
   | { action: "set_market"; market: "spot" | "futures"; leverage: number; short_enabled: boolean; confirm: string }
   | { action: "close_position"; symbol: string; confirm: string }
@@ -218,6 +219,26 @@ export async function POST(req: Request) {
         if (dca.state.qty > 0) return NextResponse.json({ error: "realize o ciclo antes" }, { status: 409 });
         await store.updateDca({ paper_state: null, state: { ...dca.state, buy_cid: null, tp_cid: null, realized_pnl: 0, cycles_done: 0, last_event: "carteira simulada reiniciada" } });
         return NextResponse.json({ ok: true });
+      }
+
+      case "binance_check": {
+        // so leitura: permissoes da chave + saldos spot. Nada e enviado como ordem.
+        const { getApiRestrictions, getBalances } = await import("@/lib/binance");
+        const [perm, bal] = await Promise.all([getApiRestrictions(), getBalances()]);
+        const dca = await store.getDca();
+        const base = dca.symbol.replace(/USDT$/, "");
+        const usdt = bal.USDT?.free ?? 0;
+        const problems: string[] = [];
+        if (perm.enableWithdrawals) problems.push("a chave TEM permissao de saque: crie outra sem saque");
+        if (!perm.enableSpotAndMarginTrading) problems.push("a chave nao tem 'Enable Spot & Margin Trading'");
+        if (usdt < dca.capital_usdt / dca.max_buys) problems.push(`USDT livre (${usdt.toFixed(2)}) nao cobre nem a 1a parcela`);
+        await store.log("info", `checagem da chave Binance: ${problems.length ? problems.join("; ") : "ok"}`);
+        return NextResponse.json({
+          ok: problems.length === 0,
+          problems,
+          permissions: perm,
+          spot: { USDT: usdt, [base]: bal[base]?.free ?? 0 },
+        });
       }
 
       case "to_dry_run":

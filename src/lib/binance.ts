@@ -209,6 +209,17 @@ export async function getBalances(): Promise<Balances> {
   return out;
 }
 
+/** Permissoes da chave (saque, trading, IP). O bot recusa chave com saque. */
+export function getApiRestrictions(): Promise<{
+  ipRestrict: boolean;
+  enableWithdrawals: boolean;
+  enableSpotAndMarginTrading: boolean;
+  enableFutures?: boolean;
+  enableReading: boolean;
+}> {
+  return signedRequest("GET", "/sapi/v1/account/apiRestrictions");
+}
+
 export function getOpenOrders(symbol: string): Promise<ExchangeOrder[]> {
   return signedRequest<ExchangeOrder[]>("GET", "/api/v3/openOrders", { symbol });
 }
