@@ -80,7 +80,7 @@ export async function buildDashboard(): Promise<DashboardState> {
     sb.from("positions").select("*").order("opened_at", { ascending: false }).limit(200),
     sb.from("orders").select("client_order_id,symbol,kind,side,type,qty,price,stop_price,status,dry_run,created_at,raw").order("created_at", { ascending: false }).limit(100),
     sb.from("signals").select("symbol,candle_time,action,close,er,reason,regime_ok").order("candle_time", { ascending: false }).limit(120),
-    sb.from("equity_snapshots").select("created_at,equity_usdt,drawdown_pct").order("created_at", { ascending: false }).limit(2000),
+    sb.from("equity_snapshots").select("created_at,equity_usdt,drawdown_pct,account_equity").order("created_at", { ascending: false }).limit(2000),
     sb.from("bot_logs").select("id,level,message,context,created_at").order("created_at", { ascending: false }).limit(150),
   ]);
   for (const r of [cfgR, posR, ordR, sigR, eqR, logR]) if (r.error) throw new Error(r.error.message);
@@ -94,6 +94,8 @@ export async function buildDashboard(): Promise<DashboardState> {
     max_drawdown_pct: Number(c.max_drawdown_pct),
     max_position_usdt: Number(c.max_position_usdt),
     peak_equity: n(c.peak_equity),
+    capital_usdt: n(c.capital_usdt),
+    capital_set_at: (c.capital_set_at as string) ?? null,
   };
 
   const positions: PositionView[] = (posR.data ?? []).map((p: Record<string, unknown>) => ({
@@ -138,12 +140,15 @@ export async function buildDashboard(): Promise<DashboardState> {
       er_min: cfg.er_min,
       max_drawdown_pct: cfg.max_drawdown_pct,
       max_position_usdt: cfg.max_position_usdt,
+      capital_usdt: cfg.capital_usdt,
+      capital_set_at: cfg.capital_set_at,
       peak_equity: cfg.peak_equity,
       killed_at: cfg.killed_at,
       kill_reason: cfg.kill_reason,
     },
     stats: {
       equity: lastEq ? Number(lastEq.equity_usdt) : null,
+      accountEquity: lastEq && lastEq.account_equity !== null ? Number(lastEq.account_equity) : null,
       drawdownPct: lastEq ? Number(lastEq.drawdown_pct) : null,
       realizedPnl: closed.reduce((s, p) => s + (p.pnl_usdt ?? 0), 0),
       trades: closed.length,

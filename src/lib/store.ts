@@ -39,6 +39,7 @@ export type EquityRow = {
   position_value: number;
   drawdown_pct: number;
   peak_equity: number;
+  account_equity: number;
   dry_run: boolean;
 };
 
@@ -60,6 +61,8 @@ export interface Store {
   getOrderRow(clientOrderId: string): Promise<OrderRow | null>;
   /** Compras de mercado que nao viraram posicao (crash entre ordem e gravacao). */
   findUnlinkedEntries(symbol: string): Promise<OrderRow[]>;
+  /** Soma do PnL das posicoes fechadas desde `since` (ISO) no modo dado. */
+  realizedPnlSince(since: string, dryRun: boolean): Promise<number>;
   upsertSignal(s: SignalRow): Promise<void>;
   insertEquity(e: EquityRow): Promise<void>;
   log(level: "info" | "warn" | "error", message: string, context?: unknown): Promise<void>;
@@ -81,6 +84,8 @@ export const DEFAULT_CONFIG: BotConfig = {
   er_min: 0.3,
   max_drawdown_pct: 20,
   max_position_usdt: 100,
+  capital_usdt: null,
+  capital_set_at: null,
   stop_limit_buffer_pct: 0.005,
   peak_equity: null,
   killed_at: null,
@@ -148,6 +153,12 @@ export class MemoryStore implements Store {
     return this.orders.filter(
       (o) => o.symbol === symbol && o.kind === "buy" && !o.position_id && !["error", "not_sent", "CANCELED", "REJECTED", "EXPIRED"].includes(o.status),
     );
+  }
+  async realizedPnlSince(since: string, dryRun: boolean) {
+    const t = Date.parse(since);
+    return this.positions
+      .filter((p) => p.status === "closed" && p.dry_run === dryRun && p.closed_at && Date.parse(p.closed_at) >= t)
+      .reduce((s, p) => s + (p.pnl_usdt ?? 0), 0);
   }
   async upsertSignal(s: SignalRow) {
     if (!this.signals.some((x) => x.symbol === s.symbol && x.candle_time === s.candle_time)) this.signals.push(s);

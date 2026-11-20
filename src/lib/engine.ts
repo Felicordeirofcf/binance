@@ -12,7 +12,7 @@
  */
 import { avgFillPrice, commissionIn, fmt, roundStep } from "./binance";
 import { baseAsset, PaperBroker, QUOTE, type Broker } from "./broker";
-import { checkKillSwitch, clientOrderId, sizePosition, type OrderKind } from "./risk";
+import { allocatedEquity, checkKillSwitch, clientOrderId, sizePosition, type OrderKind } from "./risk";
 import type { OrderRow, Store } from "./store";
 import { atr } from "./indicators";
 import { evaluate, initialStop, nextStop } from "./strategy";
@@ -145,7 +145,7 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
   balances = await broker.getBalances();
 
   // --- 2. equity e kill switch ---
-  let eq = computeEquity(ctx, balances, positions);
+  let eq = await computeEquity(ctx, balances, positions);
   const reports: SymbolReport[] = cfg.symbols.map((s) => ({ symbol: s, action: "nenhuma" }));
 
   if (cfg.killed_at) {
@@ -165,7 +165,7 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
     await ctx.store.updateConfig({ killed_at: killedAt, kill_reason: killReason, enabled: false, peak_equity: kc.peak });
     await ctx.store.log("error", `KILL SWITCH: ${killReason}`, { equity: eq.equity, peak: kc.peak });
     await ctx.notify("kill", `Kill switch acionado: ${killReason}\nPosicoes fechadas. Religar e manual.`);
-    eq = computeEquity(ctx, await broker.getBalances(), {});
+    eq = await computeEquity(ctx, await broker.getBalances(), {});
     await snapshot(ctx, eq, kc.peak);
     await ctx.persistPaper();
     return { status: "killed", mode, equity: eq.equity, drawdownPct: kc.drawdownPct, symbols: reports, killReason };
@@ -190,7 +190,7 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
           ? await exitPosition(ctx, symbol, pos, "saida_donchian", "sell", sig.candleTime)
           : await trailStop(ctx, symbol, pos, sig);
     } else if (sig.action === "buy") {
-      reports[k].action = await enterPosition(ctx, symbol, sig, eq.equity);
+      reports[k].action = await enterPosition(ctx, symbol, sig, eq);
     }
   }
 
@@ -198,7 +198,7 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
   balances = await broker.getBalances();
   const finalPositions: Record<string, Position | null> = {};
   for (const s of cfg.symbols) finalPositions[s] = await ctx.store.getOpenPosition(s);
-  eq = computeEquity(ctx, balances, finalPositions);
+  eq = await computeEquity(ctx, balances, finalPositions);
   const peak = Math.max(kc.peak, eq.equity);
   await snapshot(ctx, eq, peak);
   await ctx.persistPaper();
@@ -218,25 +218,48 @@ function hourKey(t: number): number {
 }
 const lastCandle = (ctx: Ctx, symbol: string) => ctx.data[symbol].candles[ctx.data[symbol].candles.length - 1];
 
-function computeEquity(ctx: Ctx, balances: Balances, positions: Record<string, Position | null>) {
+type Equity = {
+  /** capital do bot (alocado + PnL) ou a conta inteira se nao houver alocacao */
+  equity: number;
+  accountEquity: number;
+  freeUsdt: number;
+  positionValue: number;
+  /** caixa que o bot ainda pode gastar sem passar do capital alocado */
+  cashAvailable: number;
+};
+
+async function computeEquity(ctx: Ctx, balances: Balances, positions: Record<string, Position | null>): Promise<Equity> {
   const usdt = (balances[QUOTE]?.free ?? 0) + (balances[QUOTE]?.locked ?? 0);
   let positionValue = 0;
+  let unrealized = 0;
   for (const [symbol, pos] of Object.entries(positions)) {
     if (!pos) continue;
     const b = balances[baseAsset(symbol)];
-    const held = (b?.free ?? 0) + (b?.locked ?? 0);
-    positionValue += Math.min(pos.qty, held) * lastCandle(ctx, symbol).close;
+    const held = Math.min(pos.qty, (b?.free ?? 0) + (b?.locked ?? 0));
+    const px = lastCandle(ctx, symbol).close;
+    positionValue += held * px;
+    unrealized += held * (px - pos.entry_price);
   }
-  return { equity: usdt + positionValue, freeUsdt: balances[QUOTE]?.free ?? 0, positionValue };
+  const accountEquity = usdt + positionValue;
+  const freeUsdt = balances[QUOTE]?.free ?? 0;
+  const { capital_usdt, capital_set_at } = ctx.cfg;
+  if (capital_usdt === null || !(capital_usdt > 0)) {
+    return { equity: accountEquity, accountEquity, freeUsdt, positionValue, cashAvailable: freeUsdt };
+  }
+  const since = capital_set_at ?? new Date(0).toISOString();
+  const realized = await ctx.store.realizedPnlSince(since, ctx.paper);
+  const equity = allocatedEquity(accountEquity, capital_usdt, realized, unrealized);
+  return { equity, accountEquity, freeUsdt, positionValue, cashAvailable: Math.max(0, Math.min(freeUsdt, equity - positionValue)) };
 }
 
-async function snapshot(ctx: Ctx, eq: ReturnType<typeof computeEquity>, peak: number) {
+async function snapshot(ctx: Ctx, eq: Equity, peak: number) {
   await ctx.store.insertEquity({
     equity_usdt: round(eq.equity, 4),
     free_usdt: round(eq.freeUsdt, 4),
     position_value: round(eq.positionValue, 4),
     drawdown_pct: peak > 0 ? round((eq.equity / peak - 1) * 100, 4) : 0,
     peak_equity: round(peak, 4),
+    account_equity: round(eq.accountEquity, 4),
     dry_run: ctx.paper,
   });
 }
@@ -512,7 +535,7 @@ async function openFromFill(
   return pos;
 }
 
-async function enterPosition(ctx: Ctx, symbol: string, sig: Signal, equity: number): Promise<string> {
+async function enterPosition(ctx: Ctx, symbol: string, sig: Signal, eq: Equity): Promise<string> {
   const { cfg } = ctx;
   const last = lastCandle(ctx, symbol);
   // sinal so vale durante o candle seguinte (o backtest executa na abertura
@@ -522,8 +545,13 @@ async function enterPosition(ctx: Ctx, symbol: string, sig: Signal, equity: numb
     return "sinal_expirado";
   }
   const balances = await ctx.broker.getBalances();
-  const free = balances[QUOTE]?.free ?? 0;
-  const sz = sizePosition(equity, free, sig.close, sig.atr, cfg, ctx.data[symbol].filters);
+  // recalcula com saldos frescos: outra compra nesta mesma execucao ja pode
+  // ter consumido caixa. Com capital alocado, o bot nao gasta alem dele.
+  const open: Record<string, Position | null> = {};
+  for (const s of cfg.symbols) open[s] = await ctx.store.getOpenPosition(s);
+  eq = await computeEquity(ctx, balances, open);
+  const free = Math.min(balances[QUOTE]?.free ?? 0, eq.cashAvailable);
+  const sz = sizePosition(eq.equity, free, sig.close, sig.atr, cfg, ctx.data[symbol].filters);
   if (!sz.ok) {
     await ctx.store.log("info", `${symbol}: compra nao executada (${sz.reason})`);
     return `sem_compra:${sz.reason}`;

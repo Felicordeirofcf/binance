@@ -24,6 +24,10 @@ export type BotConfig = {
   er_min: number;
   max_drawdown_pct: number;
   max_position_usdt: number;
+  /** Capital alocado ao bot (USDT). null = usa o saldo inteiro da conta. */
+  capital_usdt: number | null;
+  /** Quando o capital alocado foi definido: o PnL do bot conta a partir daqui. */
+  capital_set_at: string | null;
   stop_limit_buffer_pct: number;
   peak_equity: number | null;
   killed_at: string | null;

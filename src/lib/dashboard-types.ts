@@ -88,12 +88,15 @@ export type DashboardState = {
     er_min: number;
     max_drawdown_pct: number;
     max_position_usdt: number;
+    capital_usdt: number | null;
+    capital_set_at: string | null;
     peak_equity: number | null;
     killed_at: string | null;
     kill_reason: string | null;
   };
   stats: {
     equity: number | null;
+    accountEquity: number | null;
     drawdownPct: number | null;
     realizedPnl: number;
     trades: number;

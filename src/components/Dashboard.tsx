@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { DashboardState, LogView, OrderView } from "@/lib/dashboard-types";
 import EquityChart from "./EquityChart";
 import Radar from "./Radar";
+import { CapitalCard, ExpectationCard } from "./Capital";
 import { ago, dt, pct, price, reason, usd } from "./format";
 import { AnimatedNumber, Badge, Button, Card, Meter, Modal, Stat, Tabs, Toasts, type ToastMsg } from "./ui";
 
@@ -216,7 +217,7 @@ export default function Dashboard() {
 
         <div className="space-y-4">
           <Card title="Radar do sinal" delay={280}>
-            {view && <Radar view={view} position={posForSym} />}
+            {view && <Radar view={view} position={posForSym} capital={stats.equity} />}
           </Card>
           <Card title="Controles" delay={320}>
             <div className="space-y-3">
@@ -256,12 +257,22 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ---------- equity + parametros ---------- */}
+      {/* ---------- equity + capital ---------- */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2" title="Curva de capital" delay={360} right={<Tabs value={eqMode} onChange={setEqMode} items={[{ id: "equity", label: "Equity" }, { id: "drawdown", label: "Drawdown" }]} />}>
           <EquityChart data={state.equity} mode={eqMode} killAt={cfg.max_drawdown_pct} />
         </Card>
-        <Card title="Parâmetros" delay={400}>
+        <Card title="Capital alocado" delay={380}>
+          <CapitalCard state={state} busy={busy !== null} onSave={(capital) => control("set_capital", { capital })} />
+        </Card>
+      </div>
+
+      {/* ---------- expectativa + parametros ---------- */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title={`Quanto posso ganhar e perder · ${view?.symbol ?? ""}`} delay={400}>
+          <ExpectationCard state={state} symbol={view?.symbol ?? cfg.symbols[0]} />
+        </Card>
+        <Card title="Parâmetros" delay={420}>
           <dl className="num grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
             {[
               ["Entrada", `máx ${cfg.donchian} candles`],
@@ -350,6 +361,7 @@ const LABEL: Record<string, string> = {
   to_dry_run: "Voltar para dry-run",
   reset_paper: "Reset da carteira",
   test_telegram: "Teste do Telegram",
+  set_capital: "Capital alocado",
 };
 
 function Spinner() {

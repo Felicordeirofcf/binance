@@ -37,6 +37,13 @@ create table if not exists bot_config (
 
 insert into bot_config (id) values (1) on conflict (id) do nothing;
 
+-- capital alocado ao bot (null = conta inteira). Sizing e kill switch
+-- usam alocado + PnL do bot desde capital_set_at, nunca acima da conta.
+alter table bot_config add column if not exists capital_usdt numeric;
+alter table bot_config add column if not exists capital_set_at timestamptz;
+alter table bot_config drop constraint if exists capital_sane;
+alter table bot_config add constraint capital_sane check (capital_usdt is null or capital_usdt >= 10);
+
 -- ---------------------------------------------------------------
 -- 2. Posicoes
 -- ---------------------------------------------------------------
@@ -126,6 +133,8 @@ create table if not exists equity_snapshots (
   dry_run        boolean not null default true,
   created_at     timestamptz not null default now()
 );
+
+alter table equity_snapshots add column if not exists account_equity numeric;
 
 create index if not exists equity_created_idx on equity_snapshots (created_at desc);
 

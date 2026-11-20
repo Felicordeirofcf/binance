@@ -32,7 +32,7 @@ function Gap({ value, span = 5 }: { value: number; span?: number }) {
   );
 }
 
-export default function Radar({ view, position }: { view: SymbolView; position?: PositionView }) {
+export default function Radar({ view, position, capital }: { view: SymbolView; position?: PositionView; capital?: number | null }) {
   const r = view.radar;
   if (!r) return <div className="text-sm text-slate-500">{view.error ? `Erro: ${view.error}` : "Sem dados suficientes."}</div>;
   const toBreak = r.dcHigh ? (r.close / r.dcHigh - 1) * 100 : 0;
@@ -78,6 +78,17 @@ export default function Radar({ view, position }: { view: SymbolView; position?:
               <Gap value={(r.close / position.stop_price - 1) * 100} span={10} />
             </Row>
           )}
+          {position && (() => {
+            const atStop = (position.stop_price - position.entry_price) * position.qty;
+            const ofCap = capital ? (atStop / capital) * 100 : null;
+            return (
+              <Row
+                ok={atStop >= 0}
+                label={atStop >= 0 ? "Se o stop executar (lucro garantido)" : "Se o stop executar"}
+                detail={`${atStop >= 0 ? "+" : ""}${atStop.toFixed(2)} USDT${ofCap !== null ? ` · ${pct(ofCap)} do capital` : ""}`}
+              />
+            );
+          })()}
           {position && (
             <Row
               ok={r.close >= position.entry_price}

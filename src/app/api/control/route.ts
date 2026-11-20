@@ -16,6 +16,7 @@ type Body =
   | { action: "rearm"; confirm: string }
   | { action: "run_now" }
   | { action: "test_telegram" }
+  | { action: "set_capital"; capital: number | null }
   | { action: "to_dry_run" }
   | { action: "reset_paper"; confirm: string };
 
@@ -74,6 +75,21 @@ export async function POST(req: Request) {
         const r = await telegramTest();
         if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
         await store.log("info", "teste de notificacao do Telegram enviado");
+        return NextResponse.json({ ok: true });
+      }
+
+      case "set_capital": {
+        const c = body.capital;
+        if (c !== null && !(typeof c === "number" && Number.isFinite(c) && c >= 10 && c <= 10_000_000)) {
+          return NextResponse.json({ error: "capital deve ser um numero entre 10 e 10.000.000 USDT (ou vazio para usar a conta inteira)" }, { status: 400 });
+        }
+        const capital = c === null ? null : Math.round(c * 100) / 100;
+        // novo capital = nova base: o drawdown do kill switch recomeca daqui
+        await store.updateConfig({ capital_usdt: capital, capital_set_at: new Date().toISOString(), peak_equity: null });
+        await store.log("warn", capital === null ? "capital alocado removido: bot usa a conta inteira" : `capital alocado definido em ${capital} USDT`, {
+          antes: cfg.capital_usdt,
+          depois: capital,
+        });
         return NextResponse.json({ ok: true });
       }
 

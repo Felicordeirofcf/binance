@@ -87,3 +87,19 @@ export function clientOrderId(kind: OrderKind, symbol: string, candleOpenTime: n
   if (id.length > 36) throw new Error(`clientOrderId com ${id.length} caracteres (max 36): ${id}`);
   return id;
 }
+
+/**
+ * Capital do bot quando ha capital alocado:
+ *   alocado + PnL realizado desde a alocacao + PnL nao realizado,
+ * nunca acima do que existe de fato na conta. Sem alocacao, e a conta toda.
+ * Sizing (1% de risco) e kill switch (drawdown) usam este valor.
+ */
+export function allocatedEquity(
+  accountEquity: number,
+  capitalUsdt: number | null,
+  realizedSince: number,
+  unrealized: number,
+): number {
+  if (capitalUsdt === null || !(capitalUsdt > 0)) return accountEquity;
+  return Math.max(0, Math.min(accountEquity, capitalUsdt + realizedSince + unrealized));
+}

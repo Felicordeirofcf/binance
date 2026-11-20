@@ -38,6 +38,7 @@ function toConfig(r: Record<string, unknown>): BotConfig {
     max_position_usdt: Number(r.max_position_usdt),
     stop_limit_buffer_pct: Number(r.stop_limit_buffer_pct),
     peak_equity: num(r.peak_equity),
+    capital_usdt: num(r.capital_usdt),
   };
 }
 
@@ -110,6 +111,15 @@ export class SupabaseStore implements Store {
       .order("created_at", { ascending: false })
       .limit(5);
     return (check(r, "unlinked") as OrderRow[]) ?? [];
+  }
+  async realizedPnlSince(since: string, dryRun: boolean) {
+    const r = await this.sb
+      .from("positions")
+      .select("pnl_usdt")
+      .eq("status", "closed")
+      .eq("dry_run", dryRun)
+      .gte("closed_at", since);
+    return ((check(r, "pnl") as { pnl_usdt: unknown }[]) ?? []).reduce((s, p) => s + Number(p.pnl_usdt ?? 0), 0);
   }
   async upsertSignal(s: SignalRow) {
     check(await this.sb.from("signals").upsert(s, { onConflict: "symbol,candle_time", ignoreDuplicates: true }), "signal");
