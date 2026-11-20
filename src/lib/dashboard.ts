@@ -109,7 +109,7 @@ export async function buildDashboard(): Promise<DashboardState> {
     entry_candle_time: Number(p.entry_candle_time),
     origin: p.origin === "manual" ? "manual" : "strategy",
     target_price: n(p.target_price),
-    trailing: p.trailing !== false,
+    trailing: p.trailing_stop !== false,
     opened_at: String(p.opened_at),
     closed_at: (p.closed_at as string) ?? null,
     exit_price: n(p.exit_price),

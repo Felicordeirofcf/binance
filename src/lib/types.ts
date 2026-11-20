@@ -51,7 +51,7 @@ export type Position = {
   /** alvo de lucro (so manual); verificado no fechamento de cada candle */
   target_price: number | null;
   /** stop movel (ATR) ligado? strategy sempre; manual opcional */
-  trailing: boolean;
+  trailing_stop: boolean;
   opened_at: string;
   closed_at?: string | null;
   exit_price?: number | null;

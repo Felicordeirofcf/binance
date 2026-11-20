@@ -38,7 +38,7 @@ describe("entrada manual", () => {
     expect(r.manual).toBe("comprou_manual");
     const p = store.positions[0];
     expect(p.origin).toBe("manual");
-    expect(p.trailing).toBe(false);
+    expect(p.trailing_stop).toBe(false);
     expect(p.stop_price / p.entry_price).toBeCloseTo(0.97, 3);
     expect(p.target_price! / p.entry_price).toBeCloseTo(1.06, 3);
     // qty arredondada para baixo no stepSize + slippage

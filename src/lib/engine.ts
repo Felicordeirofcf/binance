@@ -235,7 +235,7 @@ async function runLocked(deps: EngineDeps, opts: RunOptions): Promise<RunResult>
       if (pos.target_price !== null && sig.close >= pos.target_price) {
         reports[k].action = await exitPosition(ctx, symbol, pos, "alvo", "sell", sig.candleTime);
       } else {
-        reports[k].action = pos.trailing ? await trailStop(ctx, symbol, pos, sig) : "manual_mantem";
+        reports[k].action = pos.trailing_stop ? await trailStop(ctx, symbol, pos, sig) : "manual_mantem";
       }
     } else if (pos) {
       reports[k].action =
@@ -576,7 +576,7 @@ async function openFromFill(
     entry_candle_time: Number(candleTime),
     origin: manual || order.clientOrderId.startsWith("tb_mbuy_") ? "manual" : "strategy",
     target_price: target,
-    trailing: manual ? manual.trailing : !order.clientOrderId.startsWith("tb_mbuy_"),
+    trailing_stop: manual ? manual.trailing : !order.clientOrderId.startsWith("tb_mbuy_"),
   });
   await ctx.store.updateOrder(order.clientOrderId, { position_id: pos.id });
 

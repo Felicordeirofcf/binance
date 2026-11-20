@@ -51,7 +51,7 @@ function toPosition(r: Record<string, unknown>): Position {
     entry_candle_time: Number(r.entry_candle_time),
     origin: r.origin === "manual" ? "manual" : "strategy",
     target_price: num(r.target_price),
-    trailing: r.trailing !== false,
+    trailing_stop: r.trailing_stop !== false,
   };
 }
 
