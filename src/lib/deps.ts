@@ -4,6 +4,7 @@ import { LiveBroker } from "./broker";
 import { getFuturesClosedCandles, getFuturesFilters, getFuturesPrice } from "./futures";
 import { FuturesLiveVenue } from "./venue";
 import type { EngineDeps } from "./engine";
+import type { DcaDeps } from "./dca";
 import { SupabaseStore } from "./supabase";
 import { telegram } from "./telegram";
 
@@ -17,5 +18,15 @@ export function engineDeps(): EngineDeps {
     market: { getClosedCandles, getFilters, getPrice },
     futuresMarket: { getClosedCandles: getFuturesClosedCandles, getFilters: getFuturesFilters, getPrice: getFuturesPrice },
     liveFutures: () => new FuturesLiveVenue(),
+  };
+}
+
+/** Dependencias da acumulacao Spot (sempre mercado spot). */
+export function dcaDeps(): DcaDeps {
+  return {
+    store: new SupabaseStore(),
+    notify: telegram,
+    liveBroker: () => new LiveBroker(),
+    market: { getClosedCandles, getFilters, getPrice },
   };
 }

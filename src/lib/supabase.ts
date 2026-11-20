@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { BotConfig, Position } from "./types";
-import type { EquityRow, NewPosition, OrderRow, SignalRow, Store } from "./store";
+import { DCA_DEFAULT, type DcaRow, type EquityRow, type NewPosition, type OrderRow, type SignalRow, type Store } from "./store";
 
 /**
  * Client server-side com service_role. NUNCA importe este arquivo em
@@ -138,6 +138,26 @@ export class SupabaseStore implements Store {
   }
   async insertEquity(e: EquityRow) {
     check(await this.sb.from("equity_snapshots").insert(e), "equity");
+  }
+  async getDca(): Promise<DcaRow> {
+    const r = await this.sb.from("dca_config").select("*").eq("id", 1).maybeSingle();
+    const row = check(r, "dca_config") as Record<string, unknown> | null;
+    if (!row) return structuredClone(DCA_DEFAULT);
+    return {
+      enabled: row.enabled === true,
+      dry_run: row.dry_run !== false,
+      symbol: String(row.symbol ?? "BTCUSDT"),
+      capital_usdt: Number(row.capital_usdt),
+      max_buys: Number(row.max_buys),
+      drop_pct: Number(row.drop_pct),
+      tp_pct: Number(row.tp_pct),
+      partial_pct: Number(row.partial_pct),
+      state: { ...DCA_DEFAULT.state, ...((row.state as object) ?? {}) },
+      paper_state: (row.paper_state as DcaRow["paper_state"]) ?? null,
+    };
+  }
+  async updateDca(patch: Partial<DcaRow>) {
+    check(await this.sb.from("dca_config").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", 1), "update dca_config");
   }
   async log(level: "info" | "warn" | "error", message: string, context?: unknown) {
     // log nunca derruba a execucao

@@ -14,6 +14,7 @@ export interface Broker {
   getOrder(symbol: string, clientOrderId: string): Promise<ExchangeOrder | null>;
   marketOrder(symbol: string, side: "BUY" | "SELL", qty: string, clientOrderId: string): Promise<ExchangeOrder>;
   stopLossLimit(symbol: string, qty: string, stop: string, limit: string, clientOrderId: string): Promise<ExchangeOrder>;
+  limitOrder(symbol: string, side: "BUY" | "SELL", qty: string, price: string, clientOrderId: string): Promise<ExchangeOrder>;
   cancelOrder(symbol: string, clientOrderId: string): Promise<ExchangeOrder | null>;
 }
 
@@ -33,6 +34,9 @@ export class LiveBroker implements Broker {
   }
   stopLossLimit(symbol: string, qty: string, stop: string, limit: string, cid: string) {
     return binance.stopLossLimit(symbol, qty, stop, limit, cid);
+  }
+  limitOrder(symbol: string, side: "BUY" | "SELL", qty: string, price: string, cid: string) {
+    return binance.limitOrder(symbol, side, qty, price, cid);
   }
   cancelOrder(symbol: string, cid: string) {
     return binance.cancelOrder(symbol, cid);
@@ -86,7 +90,15 @@ export class PaperBroker implements Broker {
     const last = candles[candles.length - 1];
     if (last) this.lastPrice[symbol] = last.close;
     for (const o of this.state.orders as PaperOrder[]) {
-      if (o.symbol !== symbol || o.status !== "NEW" || o.type !== "STOP_LOSS_LIMIT") continue;
+      if (o.symbol !== symbol || o.status !== "NEW") continue;
+      if (o.type === "LIMIT") {
+        const lim = Number(o.price);
+        const hitL = candles.find((c) => c.closeTime > o.time && (o.side === "BUY" ? c.low <= lim : c.high >= lim));
+        // limite executa no preco da ordem (ou melhor, se o candle abriu alem dele)
+        if (hitL) this.fill(o, o.side === "BUY" ? Math.min(lim, hitL.open) : Math.max(lim, hitL.open));
+        continue;
+      }
+      if (o.type !== "STOP_LOSS_LIMIT") continue;
       const stop = Number(o.stopPrice);
       const limit = Number(o.price);
       // candle que fechou depois da criacao do stop (inclui o candle em curso
@@ -106,9 +118,12 @@ export class PaperBroker implements Broker {
     this.state.balances[asset] = this.bal(asset) + v;
   }
   private locked(asset: string): number {
-    return (this.state.orders as PaperOrder[])
-      .filter((o) => o.status === "NEW" && baseAsset(o.symbol) === asset)
-      .reduce((s, o) => s + Number(o.origQty), 0);
+    const open = (this.state.orders as PaperOrder[]).filter((o) => o.status === "NEW");
+    if (asset === QUOTE) {
+      // compras limite abertas prendem USDT (com folga da taxa)
+      return open.filter((o) => o.side === "BUY").reduce((s, o) => s + Number(o.origQty) * Number(o.price) * (1 + PaperBroker.FEE), 0);
+    }
+    return open.filter((o) => o.side === "SELL" && baseAsset(o.symbol) === asset).reduce((s, o) => s + Number(o.origQty), 0);
   }
 
   private fill(o: PaperOrder, price: number): void {
@@ -132,7 +147,7 @@ export class PaperBroker implements Broker {
   async getBalances(): Promise<Balances> {
     const out: Balances = {};
     for (const [asset, total] of Object.entries(this.state.balances)) {
-      const locked = asset === QUOTE ? 0 : this.locked(asset);
+      const locked = this.locked(asset);
       out[asset] = { free: Math.max(0, total - locked), locked };
     }
     return out;
@@ -193,6 +208,25 @@ export class PaperBroker implements Broker {
     const o = this.newOrder(symbol, "SELL", "STOP_LOSS_LIMIT", qty, cid);
     o.stopPrice = stop;
     o.price = limit;
+    return { ...o };
+  }
+
+  async limitOrder(symbol: string, side: "BUY" | "SELL", qty: string, price: string, cid: string): Promise<ExchangeOrder> {
+    const q = Number(qty);
+    const px = Number(price);
+    const base = baseAsset(symbol);
+    if (side === "BUY" && q * px * (1 + PaperBroker.FEE) > this.bal(QUOTE) - this.locked(QUOTE) + 1e-9) throw new Error(`paper: saldo insuficiente de ${QUOTE}`);
+    if (side === "SELL" && q > this.bal(base) - this.locked(base) + 1e-12) throw new Error(`paper: saldo insuficiente de ${base}`);
+    const ref = this.lastPrice[symbol];
+    if (ref && (side === "BUY" ? px >= ref : px <= ref)) {
+      // limite "do lado errado" executa na hora (como na Binance, a mercado no melhor preco)
+      const o = this.newOrder(symbol, side, "LIMIT", qty, cid);
+      o.price = price;
+      this.fill(o, ref);
+      return { ...o };
+    }
+    const o = this.newOrder(symbol, side, "LIMIT", qty, cid);
+    o.price = price;
     return { ...o };
   }
 

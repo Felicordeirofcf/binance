@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { engineDeps } from "@/lib/deps";
+import { dcaDeps, engineDeps } from "@/lib/deps";
+import { runDca } from "@/lib/dca";
 import { runOnce } from "@/lib/engine";
 import { SupabaseStore } from "@/lib/supabase";
 import { db } from "@/lib/supabase";
@@ -19,6 +20,13 @@ type Body =
   | { action: "set_capital"; capital: number | null; max_position_usdt?: number }
   | { action: "set_take_profit"; take_profit_pct: number | null }
   | { action: "set_entry"; entry_usdt: number | null }
+  | { action: "dca_save"; capital_usdt: number; max_buys: number; drop_pct: number; tp_pct: number; partial_pct: number; symbol?: string }
+  | { action: "dca_enable" }
+  | { action: "dca_pause" }
+  | { action: "dca_run" }
+  | { action: "dca_sell_all" }
+  | { action: "dca_sell_partial"; pct: number }
+  | { action: "dca_reset_paper" }
   | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; side?: "long" | "short"; leverage?: number; confirm: string }
   | { action: "set_market"; market: "spot" | "futures"; leverage: number; short_enabled: boolean; confirm: string }
   | { action: "close_position"; symbol: string; confirm: string }
@@ -172,6 +180,43 @@ export async function POST(req: Request) {
         if (entry !== null && entry > cfg.max_position_usdt) patch.max_position_usdt = entry;
         await store.updateConfig(patch);
         await store.log("warn", entry === null ? "entrada automatica: por risco de 1% (regra testada)" : `entrada automatica: valor fixo de ${entry} USDT`);
+        return NextResponse.json({ ok: true });
+      }
+
+      case "dca_save": {
+        const b = body;
+        const ok = b.capital_usdt >= 10 && b.max_buys >= 1 && b.max_buys <= 20 && b.drop_pct >= 1 && b.drop_pct <= 50 && b.tp_pct >= 0.5 && b.tp_pct <= 200 && b.partial_pct >= 5 && b.partial_pct <= 100;
+        if (!ok) return NextResponse.json({ error: "parametros fora do intervalo" }, { status: 400 });
+        const dca = await store.getDca();
+        const symbol = (b.symbol || dca.symbol).toUpperCase();
+        if (symbol !== dca.symbol && dca.state.qty > 0) return NextResponse.json({ error: "realize o ciclo atual antes de trocar de moeda" }, { status: 409 });
+        if (!symbol.endsWith("USDT")) return NextResponse.json({ error: "so pares USDT" }, { status: 400 });
+        await store.updateDca({ capital_usdt: b.capital_usdt, max_buys: Math.round(b.max_buys), drop_pct: b.drop_pct, tp_pct: b.tp_pct, partial_pct: b.partial_pct, symbol });
+        await store.log("warn", `acumulacao spot: ${symbol} capital ${b.capital_usdt} · ${b.max_buys} parcelas · queda ${b.drop_pct}% · lucro ${b.tp_pct}% (${b.partial_pct}% parcial)`);
+        await runDca(dcaDeps());
+        return NextResponse.json({ ok: true });
+      }
+      case "dca_enable":
+      case "dca_pause": {
+        await store.updateDca({ enabled: body.action === "dca_enable" });
+        await store.log("warn", `acumulacao spot ${body.action === "dca_enable" ? "LIGADA" : "PAUSADA (nao compra mais; vendas no alvo continuam)"}`);
+        const r = await runDca(dcaDeps());
+        return NextResponse.json({ ok: true, result: r });
+      }
+      case "dca_run":
+        return NextResponse.json({ ok: true, result: await runDca(dcaDeps()) });
+      case "dca_sell_all":
+        return NextResponse.json({ ok: true, result: await runDca(dcaDeps(), { type: "sell_all" }) });
+      case "dca_sell_partial": {
+        const pct = Number(body.pct);
+        if (!(pct >= 5 && pct <= 100)) return NextResponse.json({ error: "porcentagem entre 5 e 100" }, { status: 400 });
+        return NextResponse.json({ ok: true, result: await runDca(dcaDeps(), { type: "sell_partial", pct }) });
+      }
+      case "dca_reset_paper": {
+        const dca = await store.getDca();
+        if (!dca.dry_run) return NextResponse.json({ error: "so em dry-run" }, { status: 409 });
+        if (dca.state.qty > 0) return NextResponse.json({ error: "realize o ciclo antes" }, { status: 409 });
+        await store.updateDca({ paper_state: null, state: { ...dca.state, buy_cid: null, tp_cid: null, realized_pnl: 0, cycles_done: 0, last_event: "carteira simulada reiniciada" } });
         return NextResponse.json({ ok: true });
       }
 

@@ -86,6 +86,41 @@ export type SignalView = {
 export type EquityView = { t: string; equity: number; drawdown: number };
 export type LogView = { id: string; level: "info" | "warn" | "error"; message: string; context: unknown; created_at: string };
 
+export type DcaView = {
+  enabled: boolean;
+  dry_run: boolean;
+  symbol: string;
+  capital_usdt: number;
+  max_buys: number;
+  drop_pct: number;
+  tp_pct: number;
+  partial_pct: number;
+  parcel: number;
+  price: number | null;
+  filters: { minQty: number; minNotional: number; stepSize: number } | null;
+  /** menor parcela aceita pela Binance agora (com folga) */
+  minParcel: number | null;
+  state: {
+    buys: number;
+    qty: number;
+    cost: number;
+    avg: number | null;
+    sold_partial: boolean;
+    last_buy_price: number | null;
+    next_buy_price: number | null;
+    tp_price: number | null;
+    tp_qty: number | null;
+    realized_pnl: number;
+    cycles_done: number;
+    last_event: string | null;
+    value: number | null;
+    unrealized: number | null;
+    unrealized_pct: number | null;
+  };
+  orders: DashboardState["orders"];
+  error?: string;
+};
+
 export type DashboardState = {
   generatedAt: string;
   config: {
@@ -134,5 +169,6 @@ export type DashboardState = {
   signals: SignalView[];
   equity: EquityView[];
   logs: LogView[];
+  dca: DcaView | null;
   env: { binanceKeys: boolean; telegram: boolean; baseUrl: string; futuresBaseUrl: string };
 };

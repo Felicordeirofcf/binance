@@ -1,4 +1,4 @@
-import type { BotConfig, Position } from "./types";
+import type { BotConfig, PaperState, Position } from "./types";
 
 export type OrderRow = {
   client_order_id: string;
@@ -45,6 +45,66 @@ export type EquityRow = {
 
 export type NewPosition = Omit<Position, "id" | "opened_at">;
 
+/** Estado de um ciclo da acumulacao Spot (compra na queda + lucro parcial). */
+export type DcaState = {
+  cycle_start: number | null;
+  seq: number; // contador de ordens do ciclo (clientOrderId = cycle_start + seq)
+  buys: number;
+  last_buy_price: number | null;
+  qty: number; // moedas do ciclo
+  cost: number; // custo das moedas restantes (USDT, com taxas)
+  sold_partial: boolean;
+  buy_cid: string | null; // compra limite aberta
+  tp_cid: string | null; // venda limite aberta
+  tp_price: number | null;
+  tp_qty: number | null;
+  realized_pnl: number; // acumulado de todos os ciclos
+  cycles_done: number;
+  last_event: string | null;
+};
+
+export type DcaRow = {
+  enabled: boolean;
+  /** modo proprio da acumulacao: real so com dry_run=false explicito no banco */
+  dry_run: boolean;
+  symbol: string;
+  capital_usdt: number;
+  max_buys: number;
+  drop_pct: number;
+  tp_pct: number;
+  partial_pct: number;
+  state: DcaState;
+  paper_state: PaperState | null;
+};
+
+export const DCA_DEFAULT: DcaRow = {
+  enabled: false,
+  dry_run: true,
+  symbol: "BTCUSDT",
+  capital_usdt: 500,
+  max_buys: 5,
+  drop_pct: 10,
+  tp_pct: 10,
+  partial_pct: 50,
+  state: {
+    cycle_start: null,
+    seq: 0,
+    buys: 0,
+    last_buy_price: null,
+    qty: 0,
+    cost: 0,
+    sold_partial: false,
+    buy_cid: null,
+    tp_cid: null,
+    tp_price: null,
+    tp_qty: null,
+    realized_pnl: 0,
+    cycles_done: 0,
+    last_event: null,
+  },
+  paper_state: null,
+};
+
 /** Persistencia da engine. Implementada por SupabaseStore e MemoryStore (testes). */
 export interface Store {
   getConfig(): Promise<BotConfig>;
@@ -66,6 +126,8 @@ export interface Store {
   upsertSignal(s: SignalRow): Promise<void>;
   insertEquity(e: EquityRow): Promise<void>;
   log(level: "info" | "warn" | "error", message: string, context?: unknown): Promise<void>;
+  getDca(): Promise<DcaRow>;
+  updateDca(patch: Partial<DcaRow>): Promise<void>;
 }
 
 export const DEFAULT_CONFIG: BotConfig = {
@@ -107,6 +169,7 @@ export class MemoryStore implements Store {
   signals: SignalRow[] = [];
   equity: EquityRow[] = [];
   logs: { level: string; message: string; context?: unknown }[] = [];
+  dca: DcaRow = structuredClone(DCA_DEFAULT);
   private lock = 0;
   private seq = 1;
 
@@ -174,5 +237,11 @@ export class MemoryStore implements Store {
   }
   async log(level: "info" | "warn" | "error", message: string, context?: unknown) {
     this.logs.push({ level, message, context });
+  }
+  async getDca() {
+    return structuredClone(this.dca);
+  }
+  async updateDca(patch: Partial<DcaRow>) {
+    this.dca = { ...this.dca, ...structuredClone(patch) };
   }
 }

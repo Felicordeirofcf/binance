@@ -1,5 +1,8 @@
 import "server-only";
-import { getFilters, getKlinesForDisplay } from "./binance";
+import { getFilters, getKlinesForDisplay, getPrice } from "./binance";
+import { dcaParcel } from "./dca";
+import { SupabaseStore } from "./supabase";
+import type { DcaView } from "./dashboard-types";
 import { getFuturesFilters } from "./futures";
 import type { DashboardState, LinePoint, PositionView, SymbolView } from "./dashboard-types";
 import { atr, donchianHigh, donchianLow, efficiencyRatio, ema } from "./indicators";
@@ -98,6 +101,60 @@ async function symbolView(cfg: BotConfig, symbol: string, hasPosition: boolean):
 
 const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
+async function dcaView(): Promise<DcaView | null> {
+  try {
+    const row = await new SupabaseStore().getDca();
+    const st = row.state;
+    let price: number | null = null;
+    let filters: DcaView["filters"] = null;
+    try {
+      const [p, f] = await Promise.all([getPrice(row.symbol), getFilters(row.symbol)]);
+      price = p;
+      filters = { minQty: f.minQty, minNotional: f.minNotional, stepSize: f.stepSize };
+    } catch {
+      /* sem mercado agora */
+    }
+    const avg = st.qty > 0 ? st.cost / st.qty : null;
+    const value = price !== null ? st.qty * price : null;
+    const minParcel = filters && price ? Math.ceil(Math.max(filters.minNotional, filters.minQty * price) * 1.15 * 100) / 100 : null;
+    const r = await db().from("orders").select("client_order_id,symbol,kind,side,type,qty,price,stop_price,status,dry_run,created_at,raw").in("kind", ["dbuy", "dtp", "dsell"]).order("created_at", { ascending: false }).limit(60);
+    return {
+      enabled: row.enabled,
+      dry_run: row.dry_run,
+      symbol: row.symbol,
+      capital_usdt: row.capital_usdt,
+      max_buys: row.max_buys,
+      drop_pct: row.drop_pct,
+      tp_pct: row.tp_pct,
+      partial_pct: row.partial_pct,
+      parcel: dcaParcel(row),
+      price,
+      filters,
+      minParcel,
+      state: {
+        buys: st.buys,
+        qty: st.qty,
+        cost: st.cost,
+        avg,
+        sold_partial: st.sold_partial,
+        last_buy_price: st.last_buy_price,
+        next_buy_price: st.buys > 0 && st.buys < row.max_buys && st.last_buy_price ? st.last_buy_price * (1 - row.drop_pct / 100) : null,
+        tp_price: st.tp_price,
+        tp_qty: st.tp_qty,
+        realized_pnl: st.realized_pnl,
+        cycles_done: st.cycles_done,
+        last_event: st.last_event,
+        value,
+        unrealized: value !== null && st.qty > 0 ? value - st.cost : null,
+        unrealized_pct: value !== null && st.cost > 0 ? (value / st.cost - 1) * 100 : null,
+      },
+      orders: ((r.data ?? []) as Record<string, unknown>[]).map((o) => ({ ...(o as unknown as DcaView["orders"][number]), qty: n(o.qty), price: n(o.price), stop_price: n(o.stop_price) })),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function buildDashboard(): Promise<DashboardState> {
   const sb = db();
   const [cfgR, posR, ordR, sigR, eqR, logR] = await Promise.all([
@@ -161,6 +218,7 @@ export async function buildDashboard(): Promise<DashboardState> {
   const eqRows = (eqR.data ?? []).reverse();
   const lastEq = eqRows[eqRows.length - 1];
 
+  const dcaP = dcaView();
   const symbols = await Promise.all(
     cfg.symbols.map((s) => symbolView(cfg, s, positions.some((p) => p.symbol === s && p.status === "open"))),
   );
@@ -230,6 +288,7 @@ export async function buildDashboard(): Promise<DashboardState> {
       drawdown: Number(r.drawdown_pct),
     })),
     logs: (logR.data ?? []) as DashboardState["logs"],
+    dca: await dcaP,
     env: {
       binanceKeys: Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_API_SECRET),
       telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),

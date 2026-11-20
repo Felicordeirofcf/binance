@@ -70,8 +70,8 @@ export function checkKillSwitch(
 }
 
 /** entradas: buy/mbuy (comprado), short/mshort (vendido); saidas: sell, cover, msell, kill, emsell; stops: stop, rstop */
-export type OrderKind = "buy" | "sell" | "stop" | "rstop" | "kill" | "emsell" | "mbuy" | "msell" | "short" | "cover" | "mshort";
-const KINDS: readonly OrderKind[] = ["buy", "sell", "stop", "rstop", "kill", "emsell", "mbuy", "msell", "short", "cover", "mshort"];
+export type OrderKind = "buy" | "sell" | "stop" | "rstop" | "kill" | "emsell" | "mbuy" | "msell" | "short" | "cover" | "mshort" | "dbuy" | "dtp" | "dsell";
+const KINDS: readonly OrderKind[] = ["buy", "sell", "stop", "rstop", "kill", "emsell", "mbuy", "msell", "short", "cover", "mshort", "dbuy", "dtp", "dsell"];
 
 /**
  * clientOrderId deterministico: tb_{tipo}_{symbol}_{candleOpenTime}.

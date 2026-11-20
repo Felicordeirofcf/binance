@@ -242,6 +242,20 @@ export function marketOrder(
   });
 }
 
+/** Ordem LIMITE GTC no servidor (compra na queda / venda no alvo). */
+export function limitOrder(symbol: string, side: "BUY" | "SELL", quantity: string, price: string, clientOrderId: string): Promise<ExchangeOrder> {
+  return signedRequest<ExchangeOrder>("POST", "/api/v3/order", {
+    symbol,
+    side,
+    type: "LIMIT",
+    timeInForce: "GTC",
+    quantity,
+    price,
+    newClientOrderId: clientOrderId,
+    newOrderRespType: "FULL",
+  });
+}
+
 /**
  * Stop NO SERVIDOR da Binance (STOP_LOSS_LIMIT, GTC). Se a Vercel ou o cron
  * caírem, a posicao continua protegida. O preco limite fica abaixo do stop

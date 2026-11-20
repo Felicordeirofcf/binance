@@ -9,6 +9,7 @@ import ManualTrade from "./ManualTrade";
 import MarketCard from "./MarketCard";
 import AutoCard from "./AutoCard";
 import Alerts from "./Alerts";
+import DcaTab from "./DcaTab";
 import { setTheme, useTheme } from "./theme";
 import { ago, dt, pct, price, reason, usd } from "./format";
 import { AnimatedNumber, Badge, Button, Card, Meter, Modal, Stat, Tabs, Toasts, type ToastMsg } from "./ui";
@@ -34,6 +35,18 @@ export default function Dashboard() {
   const loading = useRef(false);
   const theme = useTheme();
   const [full, setFull] = useState(false);
+  const [page, setPage] = useState<"trend" | "dca">("trend");
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("trendbot-page") === "dca") setPage("dca");
+    } catch {}
+  }, []);
+  const goPage = (p: "trend" | "dca") => {
+    setPage(p);
+    try {
+      localStorage.setItem("trendbot-page", p);
+    } catch {}
+  };
   useEffect(() => {
     try {
       setFull(localStorage.getItem("trendbot-view") === "full");
@@ -184,6 +197,26 @@ export default function Dashboard() {
       </header>
 
       <Alerts state={state} />
+
+      {/* ---------- abas principais ---------- */}
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white/[0.03] p-1.5 ring-1 ring-white/10 sm:inline-grid sm:w-auto">
+        {(
+          [
+            ["trend", `Tendência · ${cfg.market === "futures" ? "Futuros" : "Spot"}`, cfg.enabled],
+            ["dca", "Spot · Acumulação", state.dca?.enabled ?? false],
+          ] as const
+        ).map(([id, label, on]) => (
+          <button key={id} onClick={() => goPage(id)} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${page === id ? "bg-white/10 text-white shadow" : "text-slate-400 hover:text-slate-200"}`}>
+            <span className={`h-2 w-2 rounded-full ${on ? "bg-emerald-400" : "bg-slate-500"}`} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {page === "dca" ? (
+        <DcaTab state={state} busy={busy !== null} control={control} />
+      ) : (
+      <>
 
       {error && <div className="rounded-xl bg-rose-500/10 px-4 py-2 text-sm text-rose-200 ring-1 ring-rose-500/30">Falha ao atualizar: {error}</div>}
 
@@ -382,6 +415,9 @@ export default function Dashboard() {
         {tab === "logs" && <LogsList logs={state.logs} />}
       </Card>
 
+      </>
+      )}
+
       <footer className="pb-6 text-center text-[11px] text-slate-600">
         Decisões de ordem são regras determinísticas. A IA fica fora do caminho de execução. · atualizado {dt(state.generatedAt)} · tecla <kbd className="rounded bg-white/5 px-1">r</kbd> atualiza
       </footer>
@@ -418,6 +454,13 @@ const LABEL: Record<string, string> = {
   test_telegram: "Teste do Telegram",
   set_capital: "Capital alocado",
   set_market: "Mercado",
+  dca_save: "Acumulação salva",
+  dca_enable: "Acumulação ligada",
+  dca_pause: "Acumulação pausada",
+  dca_run: "Acumulação executada",
+  dca_sell_all: "Acumulação realizada",
+  dca_sell_partial: "Realização parcial",
+  dca_reset_paper: "Carteira da acumulação reiniciada",
   manual_buy: "Compra manual",
   close_position: "Posição encerrada",
 };

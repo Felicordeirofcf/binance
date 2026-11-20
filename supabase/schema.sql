@@ -185,6 +185,30 @@ create table if not exists bot_logs (
 create index if not exists logs_created_idx on bot_logs (created_at desc);
 
 -- ---------------------------------------------------------------
+-- 6b. Acumulacao Spot (compra na queda + lucro parcial). Linha unica.
+--     Opera em paralelo ao bot de tendencia, com capital proprio.
+--     Ordens ficam na tabela orders (kinds dbuy / dtp / dsell).
+-- ---------------------------------------------------------------
+create table if not exists dca_config (
+  id           int primary key default 1,
+  enabled      boolean not null default false,
+  dry_run      boolean not null default true,  -- modo proprio: NUNCA inverta este default
+  symbol       text    not null default 'BTCUSDT',
+  capital_usdt numeric not null default 500,
+  max_buys     int     not null default 5,
+  drop_pct     numeric not null default 10,  -- compra a cada -X% desde a ultima compra
+  tp_pct       numeric not null default 10,  -- vende parte em +X% do preco medio; resto em +2X%
+  partial_pct  numeric not null default 50,  -- quanto vende no primeiro alvo
+  state        jsonb,
+  paper_state  jsonb,
+  updated_at   timestamptz not null default now(),
+  constraint dca_single_row check (id = 1),
+  constraint dca_sane check (capital_usdt >= 10 and max_buys between 1 and 20 and drop_pct between 1 and 50 and tp_pct between 0.5 and 200 and partial_pct between 5 and 100)
+);
+alter table dca_config add column if not exists dry_run boolean not null default true;
+insert into dca_config (id) values (1) on conflict (id) do nothing;
+
+-- ---------------------------------------------------------------
 -- 7. RLS ligado em TODAS as tabelas e NENHUMA policy:
 --    anon/authenticated nao leem nem escrevem nada. Acesso so via
 --    service_role, server-side, nas rotas da Vercel.
@@ -195,6 +219,7 @@ alter table orders            enable row level security;
 alter table signals           enable row level security;
 alter table equity_snapshots  enable row level security;
 alter table bot_logs          enable row level security;
+alter table dca_config        enable row level security;
 
 -- defesa extra: revoga privilegios de tabela dos papeis publicos
-revoke all on bot_config, positions, orders, signals, equity_snapshots, bot_logs from anon, authenticated;
+revoke all on bot_config, positions, orders, signals, equity_snapshots, bot_logs, dca_config from anon, authenticated;
