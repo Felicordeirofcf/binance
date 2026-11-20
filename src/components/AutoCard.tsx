@@ -23,13 +23,25 @@ export default function AutoCard({ state, busy, control }: { state: DashboardSta
   const view = state.symbols.find((s) => s.symbol === symbol);
   const stopPct = view?.radar && view.price ? ((cfg.atr_mult * view.radar.atr) / view.price) * 100 : null;
   const [fixed, setFixed] = useState(cfg.entry_usdt !== null);
-  const [entry, setEntry] = useState(cfg.entry_usdt ? String(cfg.entry_usdt) : "");
-  const entryN = Number(entry);
+  // em futuros o usuario pode digitar a MARGEM (o comum na Binance) ou o tamanho da POSICAO
+  const [base, setBase] = useState<"margin" | "position">(() => {
+    try {
+      return (localStorage.getItem("trendbot-entry-base") as "margin" | "position") || "position";
+    } catch {
+      return "position";
+    }
+  });
+  const isMargin = lev > 1 && base === "margin";
+  const [entry, setEntry] = useState(cfg.entry_usdt ? String(isMargin ? Math.round((cfg.entry_usdt / lev) * 100) / 100 : cfg.entry_usdt) : "");
+  const typedN = Number(entry);
+  const entryN = isMargin ? typedN * lev : typedN; // sempre o tamanho da posicao (nocional)
   // tamanho que o modo por risco usaria hoje
   const riskEntry = stopPct ? Math.min((capital * cfg.risk_pct) / (stopPct / 100), cfg.max_position_usdt, capital * lev) : null;
   const shownEntry = fixed ? (entryN > 0 ? entryN : null) : riskEntry;
   const lossAtStop = shownEntry && stopPct ? shownEntry * (stopPct / 100) : null;
   const tooRisky = fixed && lossAtStop !== null && lossAtStop > capital * 0.05;
+  const belowMin = fixed && mo !== null && entryN > 0 && entryN < mo.minNotional;
+  const maxOk = stopPct ? (capital * 0.05) / (stopPct / 100) : null; // maior posicao dentro do limite de 5%
   const canTrade = mo
     ? cfg.entry_usdt
       ? cfg.entry_usdt >= mo.minNotional && !(lossAtStop !== null && lossAtStop > capital * 0.05)
@@ -89,12 +101,50 @@ export default function AutoCard({ state, busy, control }: { state: DashboardSta
             ))}
           </div>
           {fixed && (
-            <div className="mt-2 flex gap-2">
-              <div className="relative flex-1">
-                <input inputMode="decimal" autoComplete="off" value={entry} onChange={(e) => setEntry(onlyNumber(e.target.value))} placeholder={mo ? `mín. ${usd(mo.minNotional)}` : "ex.: 100"} className="num w-full rounded-xl bg-white/5 py-2.5 pr-14 pl-3 text-base ring-1 ring-white/10 outline-none focus:ring-sky-400/50" />
-                <span className="pointer-events-none absolute top-3 right-3 text-xs text-slate-500">USDT</span>
+            <div className="mt-2 space-y-2 rounded-2xl bg-sky-500/[0.04] p-3 ring-1 ring-sky-400/20">
+              <div className="text-xs text-slate-300">Cada entrada automática do bot usa:</div>
+              {lev > 1 && (
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(["margin", "position"] as const).map((b) => (
+                    <button
+                      key={b}
+                      onClick={() => {
+                        setBase(b);
+                        try {
+                          localStorage.setItem("trendbot-entry-base", b);
+                        } catch {}
+                      }}
+                      className={`rounded-lg py-1.5 text-xs ring-1 ${base === b ? "bg-sky-500/20 text-white ring-sky-400/50" : "text-slate-400 ring-white/10"}`}
+                    >
+                      {b === "margin" ? `de margem (× ${lev} = posição)` : "de posição (tamanho total)"}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input inputMode="decimal" autoComplete="off" value={entry} onChange={(e) => setEntry(onlyNumber(e.target.value))} placeholder="ex.: 50" className="num w-full rounded-xl bg-white/5 py-2.5 pr-14 pl-3 text-lg ring-1 ring-white/10 outline-none focus:ring-sky-400/50" />
+                  <span className="pointer-events-none absolute top-3.5 right-3 text-xs text-slate-500">USDT</span>
+                </div>
+                <Button tone="up" disabled={busy || !(entryN >= 5) || entryN === cfg.entry_usdt || tooRisky || belowMin} onClick={() => control("set_entry", { entry_usdt: Math.round(entryN * 100) / 100 })}>Salvar</Button>
               </div>
-              <Button tone="up" disabled={busy || !(entryN >= 5) || entryN === cfg.entry_usdt || tooRisky} onClick={() => control("set_entry", { entry_usdt: entryN })}>Salvar</Button>
+              <div className="flex flex-wrap gap-1.5">
+                {[25, 50, 100, 200].map((v) => (
+                  <button key={v} onClick={() => setEntry(String(v))} className="rounded-lg px-2.5 py-1 text-xs text-slate-300 ring-1 ring-white/10 hover:bg-white/10">{v} USDT</button>
+                ))}
+              </div>
+              {entryN > 0 && (
+                <div className="num text-xs text-slate-400">
+                  posição {usd(entryN)} · margem {usd(entryN / lev)}{lev > 1 ? ` (${lev}x)` : ""}
+                </div>
+              )}
+              {belowMin && mo && <p className="text-xs text-rose-300">A Binance não aceita: a menor posição em {symbol} é {usd(mo.minNotional)} USDT{lev > 1 ? ` (margem ${usd(mo.minNotional / lev)})` : ""}.</p>}
+              {tooRisky && maxOk !== null && (
+                <p className="text-xs text-rose-300">
+                  Perderia {usd(lossAtStop ?? 0)} no stop, mais que 5% do capital ({usd(capital * 0.05)}). Máximo hoje: posição de {usd(maxOk)}{lev > 1 ? ` = margem de ${usd(maxOk / lev)}` : ""}. Ou aumente o capital.
+                </p>
+              )}
+              {cfg.entry_usdt !== null && <div className="text-[11px] text-emerald-300">salvo: posição de {usd(cfg.entry_usdt)} por entrada</div>}
             </div>
           )}
           <div className="num mt-2 grid grid-cols-3 gap-2 text-xs">
@@ -113,7 +163,6 @@ export default function AutoCard({ state, busy, control }: { state: DashboardSta
               <div className="text-base text-rose-300">−{usd(capital * (cfg.max_drawdown_pct / 100))}</div>
             </div>
           </div>
-          {tooRisky && <p className="mt-2 text-xs text-rose-300">Com esse valor, o stop de hoje perderia mais de 5% do capital: o bot recusaria a entrada.</p>}
           {fixed && <p className="mt-1 text-[11px] text-slate-500">Com valor fixo, a perda no stop muda com a volatilidade (hoje ≈ {stopPct?.toFixed(1) ?? "—"}% do valor da entrada).</p>}
           {mo && !canTrade && (
             <p className="mt-2 rounded-xl bg-amber-400/10 p-2.5 text-xs text-amber-200 ring-1 ring-amber-400/25">
