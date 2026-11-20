@@ -10,6 +10,7 @@ import MarketCard from "./MarketCard";
 import AutoCard from "./AutoCard";
 import Alerts from "./Alerts";
 import DcaTab from "./DcaTab";
+import ConfigTab from "./ConfigTab";
 import { setTheme, useTheme } from "./theme";
 import { ago, dt, pct, price, reason, usd } from "./format";
 import { AnimatedNumber, Badge, Button, Card, Meter, Modal, Stat, Tabs, Toasts, type ToastMsg } from "./ui";
@@ -35,13 +36,14 @@ export default function Dashboard() {
   const loading = useRef(false);
   const theme = useTheme();
   const [full, setFull] = useState(false);
-  const [page, setPage] = useState<"trend" | "dca">("trend");
+  const [page, setPage] = useState<"trend" | "dca" | "config">("trend");
   useEffect(() => {
     try {
-      if (localStorage.getItem("trendbot-page") === "dca") setPage("dca");
+      const p = localStorage.getItem("trendbot-page");
+      if (p === "dca" || p === "config") setPage(p);
     } catch {}
   }, []);
-  const goPage = (p: "trend" | "dca") => {
+  const goPage = (p: "trend" | "dca" | "config") => {
     setPage(p);
     try {
       localStorage.setItem("trendbot-page", p);
@@ -199,11 +201,12 @@ export default function Dashboard() {
       <Alerts state={state} />
 
       {/* ---------- abas principais ---------- */}
-      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white/[0.03] p-1.5 ring-1 ring-white/10 sm:inline-grid sm:w-auto">
+      <div className="grid grid-cols-3 gap-2 rounded-2xl bg-white/[0.03] p-1.5 ring-1 ring-white/10 sm:inline-grid sm:w-auto">
         {(
           [
             ["trend", `Tendência · ${cfg.market === "futures" ? "Futuros" : "Spot"}`, cfg.enabled],
             ["dca", "Spot · Acumulação", state.dca?.enabled ?? false],
+            ["config", "⚙ Config", state.env.binanceKeys],
           ] as const
         ).map(([id, label, on]) => (
           <button key={id} onClick={() => goPage(id)} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${page === id ? "bg-white/10 text-white shadow" : "text-slate-400 hover:text-slate-200"}`}>
@@ -213,7 +216,9 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {page === "dca" ? (
+      {page === "config" ? (
+        <ConfigTab state={state} toast={(ok, t) => toast(ok ? "up" : "down", t)} />
+      ) : page === "dca" ? (
         <DcaTab state={state} busy={busy !== null} control={control} />
       ) : (
       <>
