@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { DashboardState, DcaView } from "@/lib/dashboard-types";
 import { dt, pct, price, usd } from "./format";
 import { Badge, Button, Card, Modal, Stat } from "./ui";
+import GridView, { ModeSwitch } from "./GridView";
 
 const onlyNumber = (v: string) => v.replace(/[^0-9.,]/g, "").replace(",", ".");
 
@@ -75,6 +76,7 @@ export default function DcaTab({ state, busy, control }: { state: DashboardState
   }));
   const [confirm, setConfirm] = useState<null | { action: string; pct?: number; title: string; body: string }>(null);
   if (!d) return <Card title="Spot · Acumulação"><p className="text-sm text-slate-400">Aplique o schema mais novo (tabela dca_config) no Supabase.</p></Card>;
+  if (d.mode === "grid") return <GridView state={state} busy={busy} control={control} />;
 
   const s = d.state;
   const cap = Number(form.capital), nb = Number(form.max_buys), drop = Number(form.drop), tp = Number(form.tp), part = Number(form.partial);
@@ -100,7 +102,8 @@ export default function DcaTab({ state, busy, control }: { state: DashboardState
             </div>
             <p className="text-xs text-slate-500">Compra a cada −{d.drop_pct}% desde a última compra (até {d.max_buys}×), vende {d.partial_pct}% em +{d.tp_pct}% do preço médio e o resto em +{2 * d.tp_pct}%. Numa queda forte, só para de comprar e segura.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ModeSwitch d={d} busy={busy} control={control} />
             <Button onClick={() => control("dca_run")} disabled={busy}>▶ Executar agora</Button>
             <button
               disabled={busy}

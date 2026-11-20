@@ -86,7 +86,12 @@ export type SignalView = {
 export type EquityView = { t: string; equity: number; drawdown: number };
 export type LogView = { id: string; level: "info" | "warn" | "error"; message: string; context: unknown; created_at: string };
 
+export type GridLevelView = { k: number; price: number; waiting: boolean; qty: number; cost: number; buy_fill: number | null; sell_price: number | null; value: number | null; pnl: number | null };
+
 export type DcaView = {
+  mode: "grid" | "average";
+  lot_usdt: number;
+  grid: { anchor: number | null; levels: GridLevelView[]; realized_pnl: number; trades: number; last_event: string | null; held_cost: number; held_value: number | null };
   enabled: boolean;
   dry_run: boolean;
   symbol: string;

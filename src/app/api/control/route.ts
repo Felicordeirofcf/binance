@@ -20,12 +20,13 @@ type Body =
   | { action: "set_capital"; capital: number | null; max_position_usdt?: number }
   | { action: "set_take_profit"; take_profit_pct: number | null }
   | { action: "set_entry"; entry_usdt: number | null }
-  | { action: "dca_save"; capital_usdt: number; max_buys: number; drop_pct: number; tp_pct: number; partial_pct: number; symbol?: string }
+  | { action: "dca_save"; capital_usdt: number; max_buys: number; drop_pct: number; tp_pct: number; partial_pct: number; symbol?: string; mode?: "grid" | "average"; lot_usdt?: number }
   | { action: "dca_enable" }
   | { action: "dca_pause" }
   | { action: "dca_run" }
   | { action: "dca_sell_all" }
   | { action: "dca_sell_partial"; pct: number }
+  | { action: "dca_sell_profitable" }
   | { action: "dca_reset_paper" }
   | { action: "binance_check" }
   | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; side?: "long" | "short"; leverage?: number; confirm: string }
@@ -186,13 +187,20 @@ export async function POST(req: Request) {
 
       case "dca_save": {
         const b = body;
+        const mode = b.mode === "average" ? "average" : b.mode === "grid" ? "grid" : undefined;
+        const lot = b.lot_usdt === undefined ? undefined : Number(b.lot_usdt);
+        if (lot !== undefined && !(lot >= 5 && lot <= 100_000)) return NextResponse.json({ error: "lote entre 5 e 100.000 USDT" }, { status: 400 });
         const ok = b.capital_usdt >= 10 && b.max_buys >= 1 && b.max_buys <= 20 && b.drop_pct >= 1 && b.drop_pct <= 50 && b.tp_pct >= 0.5 && b.tp_pct <= 200 && b.partial_pct >= 5 && b.partial_pct <= 100;
         if (!ok) return NextResponse.json({ error: "parametros fora do intervalo" }, { status: 400 });
         const dca = await store.getDca();
         const symbol = (b.symbol || dca.symbol).toUpperCase();
-        if (symbol !== dca.symbol && dca.state.qty > 0) return NextResponse.json({ error: "realize o ciclo atual antes de trocar de moeda" }, { status: 409 });
+        const holdingGrid = dca.grid.levels.some((l) => l.qty > 0);
+        if (mode && mode !== dca.mode && (dca.state.qty > 0 || holdingGrid)) {
+          return NextResponse.json({ error: "realize as moedas atuais antes de trocar de modo" }, { status: 409 });
+        }
+        if (symbol !== dca.symbol && (dca.state.qty > 0 || holdingGrid)) return NextResponse.json({ error: "realize o ciclo atual antes de trocar de moeda" }, { status: 409 });
         if (!symbol.endsWith("USDT")) return NextResponse.json({ error: "so pares USDT" }, { status: 400 });
-        await store.updateDca({ capital_usdt: b.capital_usdt, max_buys: Math.round(b.max_buys), drop_pct: b.drop_pct, tp_pct: b.tp_pct, partial_pct: b.partial_pct, symbol });
+        await store.updateDca({ capital_usdt: b.capital_usdt, max_buys: Math.round(b.max_buys), drop_pct: b.drop_pct, tp_pct: b.tp_pct, partial_pct: b.partial_pct, symbol, ...(mode ? { mode } : {}), ...(lot !== undefined ? { lot_usdt: lot } : {}) });
         await store.log("warn", `acumulacao spot: ${symbol} capital ${b.capital_usdt} · ${b.max_buys} parcelas · queda ${b.drop_pct}% · lucro ${b.tp_pct}% (${b.partial_pct}% parcial)`);
         await runDca(dcaDeps());
         return NextResponse.json({ ok: true });
@@ -208,6 +216,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, result: await runDca(dcaDeps()) });
       case "dca_sell_all":
         return NextResponse.json({ ok: true, result: await runDca(dcaDeps(), { type: "sell_all" }) });
+      case "dca_sell_profitable":
+        return NextResponse.json({ ok: true, result: await runDca(dcaDeps(), { type: "sell_profitable" }) });
       case "dca_sell_partial": {
         const pct = Number(body.pct);
         if (!(pct >= 5 && pct <= 100)) return NextResponse.json({ error: "porcentagem entre 5 e 100" }, { status: 400 });

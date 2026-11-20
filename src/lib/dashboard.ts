@@ -117,8 +117,34 @@ async function dcaView(): Promise<DcaView | null> {
     const avg = st.qty > 0 ? st.cost / st.qty : null;
     const value = price !== null ? st.qty * price : null;
     const minParcel = filters && price ? Math.ceil(Math.max(filters.minNotional, filters.minQty * price) * 1.15 * 100) / 100 : null;
-    const r = await db().from("orders").select("client_order_id,symbol,kind,side,type,qty,price,stop_price,status,dry_run,created_at,raw").in("kind", ["dbuy", "dtp", "dsell"]).order("created_at", { ascending: false }).limit(60);
+    const r = await db().from("orders").select("client_order_id,symbol,kind,side,type,qty,price,stop_price,status,dry_run,created_at,raw").in("kind", ["dbuy", "dtp", "dsell", "gbuy", "gsell"]).order("created_at", { ascending: false }).limit(60);
+    const g = row.grid;
+    const levels = [...g.levels]
+      .sort((a, b) => a.k - b.k)
+      .map((l) => ({
+        k: l.k,
+        price: l.price,
+        waiting: Boolean(l.buy_cid),
+        qty: l.qty,
+        cost: l.cost,
+        buy_fill: l.buy_fill,
+        sell_price: l.sell_price,
+        value: price !== null && l.qty > 0 ? l.qty * price : null,
+        pnl: price !== null && l.qty > 0 ? l.qty * price * 0.999 - l.cost : null,
+      }));
+    const held = levels.filter((l) => l.qty > 0);
     return {
+      mode: row.mode,
+      lot_usdt: row.lot_usdt,
+      grid: {
+        anchor: g.anchor,
+        levels,
+        realized_pnl: g.realized_pnl,
+        trades: g.trades,
+        last_event: g.last_event,
+        held_cost: held.reduce((s, l) => s + l.cost, 0),
+        held_value: price !== null ? held.reduce((s, l) => s + l.qty * price, 0) : null,
+      },
       enabled: row.enabled,
       dry_run: row.dry_run,
       symbol: row.symbol,

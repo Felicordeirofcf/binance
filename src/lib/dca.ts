@@ -22,6 +22,7 @@ import { clientOrderId, type OrderKind } from "./risk";
 import { DCA_DEFAULT, type DcaRow, type DcaState, type Store } from "./store";
 import type { Notifier } from "./telegram";
 import type { ExchangeOrder, SymbolFilters } from "./types";
+import { runGrid } from "./grid";
 
 export type DcaDeps = {
   store: Store;
@@ -31,7 +32,7 @@ export type DcaDeps = {
   now?: () => number;
 };
 
-export type DcaAction = { type: "sell_all" } | { type: "sell_partial"; pct: number };
+export type DcaAction = { type: "sell_all" } | { type: "sell_partial"; pct: number } | { type: "sell_profitable" };
 
 export type DcaResult = { status: "ok" | "locked" | "idle"; event: string | null; state: DcaState };
 
@@ -74,7 +75,8 @@ async function runLocked(deps: DcaDeps, action?: DcaAction): Promise<DcaResult> 
   const now = deps.now ?? Date.now;
   const row = await deps.store.getDca();
   const st: DcaState = { ...DCA_DEFAULT.state, ...row.state };
-  const active = row.enabled || st.qty > 0 || st.buy_cid || st.tp_cid || action;
+  const gridActive = row.mode === "grid" && row.grid.levels.some((l) => l.qty > 0 || l.buy_cid || l.sell_cid);
+  const active = row.enabled || st.qty > 0 || st.buy_cid || st.tp_cid || gridActive || action;
   if (!active) return { status: "idle", event: null, state: st };
 
   // modo PROPRIO da acumulacao (independente do bot de tendencia)
@@ -98,6 +100,27 @@ async function runLocked(deps: DcaDeps, action?: DcaAction): Promise<DcaResult> 
   if (!px) throw new Error(`${symbol}: sem preco`);
   paperBroker?.sync(symbol, candles);
   paperBroker?.setPrice(symbol, px);
+
+  // --- modo GRADE: lotes independentes ---
+  if (row.mode === "grid") {
+    const r = await runGrid(
+      {
+        row,
+        store: deps.store,
+        broker,
+        paper,
+        f,
+        price: px,
+        now,
+        notify: deps.notify,
+        save: async (g, extra) => {
+          await deps.store.updateDca({ grid: g, ...(extra ?? {}), ...(paperBroker ? { paper_state: paperBroker.snapshot() } : {}) });
+        },
+      },
+      action?.type === "sell_all" ? { type: "sell_all" } : action?.type === "sell_profitable" || action?.type === "sell_partial" ? { type: "sell_profitable" } : undefined,
+    );
+    return { status: "ok", event: r.event, state: st };
+  }
 
   const ctx: Ctx = { row, st, store: deps.store, broker, paper, f, price: px, now, notify: deps.notify, events: [] };
   const save = async () => {

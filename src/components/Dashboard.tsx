@@ -205,7 +205,7 @@ export default function Dashboard() {
         {(
           [
             ["trend", `Tendência · ${cfg.market === "futures" ? "Futuros" : "Spot"}`, cfg.enabled],
-            ["dca", "Spot · Acumulação", state.dca?.enabled ?? false],
+            ["dca", state.dca?.mode === "grid" ? "Spot · Grade" : "Spot · Acumulação", state.dca?.enabled ?? false],
             ["config", "⚙ Config", state.env.binanceKeys],
           ] as const
         ).map(([id, label, on]) => (
@@ -466,6 +466,7 @@ const LABEL: Record<string, string> = {
   dca_sell_all: "Acumulação realizada",
   dca_sell_partial: "Realização parcial",
   dca_reset_paper: "Carteira da acumulação reiniciada",
+  dca_sell_profitable: "Lotes no lucro realizados",
   manual_buy: "Compra manual",
   close_position: "Posição encerrada",
 };

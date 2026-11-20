@@ -38,7 +38,7 @@ describe("acumulacao spot", () => {
     const prices = [100, ...ramp(100, 80, 20), ...ramp(80, 110, 40), ...ramp(110, 105, 5)];
     const c = path(prices);
     const store = new MemoryStore();
-    store.dca = { ...store.dca, enabled: true, capital_usdt: 500, max_buys: 5, drop_pct: 10, tp_pct: 10, partial_pct: 50 };
+    store.dca = { ...store.dca, mode: "average", enabled: true, capital_usdt: 500, max_buys: 5, drop_pct: 10, tp_pct: 10, partial_pct: 50 };
     const { deps, at } = harness(store, c);
     const seen: number[] = [];
     for (at.i = 0; at.i < c.length; at.i++) {
@@ -64,7 +64,7 @@ describe("acumulacao spot", () => {
   it("queda alem das parcelas: para de comprar e segura (nao vende no prejuizo)", async () => {
     const c = path([100, ...ramp(100, 40, 60)]);
     const store = new MemoryStore();
-    store.dca = { ...store.dca, enabled: true, capital_usdt: 500, max_buys: 5, drop_pct: 10 };
+    store.dca = { ...store.dca, mode: "average", enabled: true, capital_usdt: 500, max_buys: 5, drop_pct: 10 };
     const { deps, at } = harness(store, c);
     for (at.i = 0; at.i < c.length; at.i++) await runDca(deps);
     expect(store.dca.state.buys).toBe(5);
@@ -76,7 +76,7 @@ describe("acumulacao spot", () => {
   it("idempotente: varias execucoes na mesma hora nao duplicam ordens", async () => {
     const c = path([100, 99, 98]);
     const store = new MemoryStore();
-    store.dca = { ...store.dca, enabled: true };
+    store.dca = { ...store.dca, mode: "average", enabled: true };
     const { deps, at } = harness(store, c);
     at.i = 2;
     for (let k = 0; k < 4; k++) await runDca(deps);
@@ -87,7 +87,7 @@ describe("acumulacao spot", () => {
   it("pausar cancela a compra na queda e mantem a venda no alvo", async () => {
     const c = path([100, 99]);
     const store = new MemoryStore();
-    store.dca = { ...store.dca, enabled: true };
+    store.dca = { ...store.dca, mode: "average", enabled: true };
     const { deps, at } = harness(store, c);
     at.i = 1;
     await runDca(deps);
@@ -101,7 +101,7 @@ describe("acumulacao spot", () => {
   it("realizar tudo pelo painel vende a mercado, contabiliza e pausa", async () => {
     const c = path([100, 104]);
     const store = new MemoryStore();
-    store.dca = { ...store.dca, enabled: true };
+    store.dca = { ...store.dca, mode: "average", enabled: true };
     const { deps, at } = harness(store, c);
     at.i = 0;
     await runDca(deps);
@@ -118,7 +118,7 @@ describe("acumulacao spot", () => {
   it("realizar parcial vende a fracao pedida", async () => {
     const c = path([100, 103]);
     const store = new MemoryStore();
-    store.dca = { ...store.dca, enabled: true };
+    store.dca = { ...store.dca, mode: "average", enabled: true };
     const { deps, at } = harness(store, c);
     await runDca(deps);
     const q0 = store.dca.state.qty;
@@ -130,25 +130,25 @@ describe("acumulacao spot", () => {
 
   it("modo proprio: real chama a Binance real; papel nunca", async () => {
     const store = new MemoryStore({ dry_run: true }); // bot de tendencia em papel
-    store.dca = { ...store.dca, enabled: true, dry_run: false };
+    store.dca = { ...store.dca, mode: "average", enabled: true, dry_run: false };
     const { deps } = harness(store, path([100]));
     await expect(runDca(deps)).rejects.toThrow(/real nao/); // tentou o broker real
     const s2 = new MemoryStore({ dry_run: false }); // tendencia real...
-    s2.dca = { ...s2.dca, enabled: true, dry_run: true }; // ...acumulacao em papel
+    s2.dca = { ...s2.dca, mode: "average", enabled: true, dry_run: true }; // ...acumulacao em papel
     await runDca(harness(s2, path([100])).deps);
     expect(s2.orders.every((o) => o.dry_run)).toBe(true);
   });
 
   it("recusa spot real no mesmo par do bot de tendencia em spot real", async () => {
     const store = new MemoryStore({ dry_run: false, market: "spot", symbols: ["BTCUSDT"] });
-    store.dca = { ...store.dca, enabled: true, dry_run: false };
+    store.dca = { ...store.dca, mode: "average", enabled: true, dry_run: false };
     await expect(runDca(harness(store, path([100])).deps)).rejects.toThrow(/mesmo|Spot real/);
   });
 
   it("mudar a queda % reposiciona a compra que estava esperando", async () => {
     const c = path([100, 99]);
     const store = new MemoryStore();
-    store.dca = { ...store.dca, enabled: true, drop_pct: 10 };
+    store.dca = { ...store.dca, mode: "average", enabled: true, drop_pct: 10 };
     const { deps, at } = harness(store, c);
     at.i = 1;
     await runDca(deps);

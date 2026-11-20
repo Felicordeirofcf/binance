@@ -64,7 +64,36 @@ export type DcaState = {
   last_event: string | null;
 };
 
+/** Um nivel da grade: no maximo 1 lote por nivel. */
+export type GridLevel = {
+  k: number; // indice do nivel (0 = ancora)
+  price: number; // preco de compra do nivel
+  buy_cid: string | null; // compra limite esperando
+  qty: number; // moedas do lote (0 = nivel livre)
+  cost: number; // USDT pagos no lote (com taxa)
+  buy_fill: number | null; // preco real da compra
+  sell_cid: string | null; // venda limite no alvo
+  sell_price: number | null;
+};
+
+export type GridState = {
+  anchor: number | null;
+  anchor_time: number | null;
+  seq: number;
+  levels: GridLevel[];
+  realized_pnl: number;
+  trades: number; // vendas com lucro (lotes fechados)
+  last_event: string | null;
+};
+
+export const GRID_EMPTY: GridState = { anchor: null, anchor_time: null, seq: 0, levels: [], realized_pnl: 0, trades: 0, last_event: null };
+
 export type DcaRow = {
+  /** grid = lotes independentes (compra a cada -X%, vende cada lote em +Y%); average = preco medio */
+  mode: "grid" | "average";
+  /** valor de cada lote da grade (USDT) */
+  lot_usdt: number;
+  grid: GridState;
   enabled: boolean;
   /** modo proprio da acumulacao: real so com dry_run=false explicito no banco */
   dry_run: boolean;
@@ -79,6 +108,9 @@ export type DcaRow = {
 };
 
 export const DCA_DEFAULT: DcaRow = {
+  mode: "grid",
+  lot_usdt: 11,
+  grid: structuredClone(GRID_EMPTY),
   enabled: false,
   dry_run: true,
   symbol: "BTCUSDT",

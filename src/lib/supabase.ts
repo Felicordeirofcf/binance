@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { BotConfig, Position } from "./types";
-import { DCA_DEFAULT, type DcaRow, type EquityRow, type NewPosition, type OrderRow, type SignalRow, type Store } from "./store";
+import { DCA_DEFAULT, GRID_EMPTY, type DcaRow, type GridState, type EquityRow, type NewPosition, type OrderRow, type SignalRow, type Store } from "./store";
 
 /**
  * Client server-side com service_role. NUNCA importe este arquivo em
@@ -144,6 +144,9 @@ export class SupabaseStore implements Store {
     const row = check(r, "dca_config") as Record<string, unknown> | null;
     if (!row) return structuredClone(DCA_DEFAULT);
     return {
+      mode: row.mode === "average" ? "average" : "grid",
+      lot_usdt: Number(row.lot_usdt ?? 11),
+      grid: { ...GRID_EMPTY, ...((row.grid_state as GridState | null) ?? {}) },
       enabled: row.enabled === true,
       dry_run: row.dry_run !== false,
       symbol: String(row.symbol ?? "BTCUSDT"),
@@ -157,7 +160,10 @@ export class SupabaseStore implements Store {
     };
   }
   async updateDca(patch: Partial<DcaRow>) {
-    check(await this.sb.from("dca_config").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", 1), "update dca_config");
+    const { grid, ...rest } = patch;
+    const row: Record<string, unknown> = { ...rest, updated_at: new Date().toISOString() };
+    if (grid !== undefined) row.grid_state = grid;
+    check(await this.sb.from("dca_config").update(row).eq("id", 1), "update dca_config");
   }
   async log(level: "info" | "warn" | "error", message: string, context?: unknown) {
     // log nunca derruba a execucao

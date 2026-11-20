@@ -207,6 +207,10 @@ create table if not exists dca_config (
   constraint dca_sane check (capital_usdt >= 10 and max_buys between 1 and 20 and drop_pct between 1 and 50 and tp_pct between 0.5 and 200 and partial_pct between 5 and 100)
 );
 alter table dca_config add column if not exists dry_run boolean not null default true;
+-- grade: lotes independentes (compra a cada -drop_pct%, vende cada lote em +tp_pct%)
+alter table dca_config add column if not exists mode text not null default 'grid';
+alter table dca_config add column if not exists lot_usdt numeric not null default 11;
+alter table dca_config add column if not exists grid_state jsonb;
 insert into dca_config (id) values (1) on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------
