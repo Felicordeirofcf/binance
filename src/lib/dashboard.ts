@@ -203,7 +203,7 @@ export async function buildDashboard(): Promise<DashboardState> {
       profitFactor: loss > 0 ? gross / loss : null,
       lastRunAt: lastEq ? String(lastEq.created_at) : null,
       lastEvent: (() => {
-        const l = (logR.data ?? []).find((x: { message: string }) => !/^(bot |capital|mercado|teto|modo|kill switch REARMADO|carteira)/.test(x.message));
+        const l = (logR.data ?? []).find((x: { message: string }) => !/^(bot |capital|mercado|teto|modo|kill switch REARMADO|carteira|realizar lucro|entrada automatica|teste de notificacao)/.test(x.message));
         return l ? { level: String(l.level), message: String(l.message), at: String(l.created_at) } : null;
       })(),
       recentError: (() => {
