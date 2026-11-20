@@ -56,6 +56,14 @@ async function symbolView(cfg: BotConfig, symbol: string, hasPosition: boolean):
       const c = closed[closed.length - 1].close;
       radarShort = { dcLow: Number.isFinite(s.dcLow) ? s.dcLow : null, breakdown: c < s.dcLow, belowEma: c < s.emaTrend, regimeOk: s.regimeOk, action: s.action, reason: s.reason };
     }
+    // previa com o candle em formacao (so exibicao: a engine decide no fechamento)
+    let preview: SymbolView["preview"] = null;
+    const openC = all[all.length - 1];
+    if (!hasPosition && openC && openC.closeTime >= now && all.length > cfg.ema_trend + 5) {
+      if (evaluate(all, cfg, false).action === "buy") preview = { side: "long", candleCloseAt: openC.closeTime + 1, close: openC.close };
+      else if (cfg.market === "futures" && cfg.short_enabled && evaluateShort(all, cfg, false).action === "short")
+        preview = { side: "short", candleCloseAt: openC.closeTime + 1, close: openC.close };
+    }
     let filters: SymbolView["filters"] = null;
     try {
       const f = cfg.market === "futures" ? await getFuturesFilters(symbol) : await getFilters(symbol);
@@ -66,6 +74,7 @@ async function symbolView(cfg: BotConfig, symbol: string, hasPosition: boolean):
     return {
       symbol,
       filters,
+      preview,
       radarShort,
       price: all.length ? all[all.length - 1].close : null,
       candles: all.slice(from).map((c) => ({

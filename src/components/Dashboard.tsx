@@ -8,6 +8,7 @@ import { CapitalCard, ExpectationCard } from "./Capital";
 import ManualTrade from "./ManualTrade";
 import MarketCard from "./MarketCard";
 import AutoCard from "./AutoCard";
+import Alerts from "./Alerts";
 import { setTheme, useTheme } from "./theme";
 import { ago, dt, pct, price, reason, usd } from "./format";
 import { AnimatedNumber, Badge, Button, Card, Meter, Modal, Stat, Tabs, Toasts, type ToastMsg } from "./ui";
@@ -171,6 +172,8 @@ export default function Dashboard() {
           </Button>
         </div>
       </header>
+
+      <Alerts state={state} />
 
       {error && <div className="rounded-xl bg-rose-500/10 px-4 py-2 text-sm text-rose-200 ring-1 ring-rose-500/30">Falha ao atualizar: {error}</div>}
 

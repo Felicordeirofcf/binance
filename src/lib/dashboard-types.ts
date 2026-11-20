@@ -28,6 +28,8 @@ export type SymbolView = {
   } | null;
   /** condicoes do lado vendido (so futuros com vendido ligado) */
   radarShort?: { dcLow: number | null; breakdown: boolean; belowEma: boolean; regimeOk: boolean; action: string; reason: string } | null;
+  /** previa: o candle ABERTO ja cumpre as condicoes? (se fechar assim, o bot entra) */
+  preview?: { side: "long" | "short"; candleCloseAt: number; close: number } | null;
   /** filtros da exchange no mercado atual (para mostrar o minimo operavel) */
   filters?: { minQty: number; minNotional: number; stepSize: number } | null;
   error?: string;
