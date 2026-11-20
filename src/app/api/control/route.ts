@@ -3,6 +3,7 @@ import { engineDeps } from "@/lib/deps";
 import { runOnce } from "@/lib/engine";
 import { SupabaseStore } from "@/lib/supabase";
 import { db } from "@/lib/supabase";
+import { telegramTest } from "@/lib/telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ type Body =
   | { action: "kill"; reason?: string; confirm: string }
   | { action: "rearm"; confirm: string }
   | { action: "run_now" }
+  | { action: "test_telegram" }
   | { action: "to_dry_run" }
   | { action: "reset_paper"; confirm: string };
 
@@ -66,6 +68,13 @@ export async function POST(req: Request) {
       case "run_now": {
         const result = await runOnce(engineDeps());
         return NextResponse.json({ ok: true, result });
+      }
+
+      case "test_telegram": {
+        const r = await telegramTest();
+        if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+        await store.log("info", "teste de notificacao do Telegram enviado");
+        return NextResponse.json({ ok: true });
       }
 
       case "to_dry_run":

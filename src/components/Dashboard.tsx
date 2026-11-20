@@ -283,6 +283,11 @@ export default function Dashboard() {
             <Badge tone={state.env.binanceKeys ? "up" : "slate"}>{state.env.binanceKeys ? "chaves Binance ok" : "sem chaves Binance"}</Badge>
             <Badge tone={state.env.telegram ? "up" : "slate"}>{state.env.telegram ? "Telegram ok" : "sem Telegram"}</Badge>
           </div>
+          <div className="mt-3">
+            <Button disabled={busy !== null || !state.env.telegram} title={state.env.telegram ? "" : "configure TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID na Vercel"} onClick={() => control("test_telegram")}>
+              {busy === "test_telegram" ? <Spinner /> : "✈"} Testar Telegram
+            </Button>
+          </div>
         </Card>
       </div>
 
@@ -344,6 +349,7 @@ const LABEL: Record<string, string> = {
   run_now: "Execução",
   to_dry_run: "Voltar para dry-run",
   reset_paper: "Reset da carteira",
+  test_telegram: "Teste do Telegram",
 };
 
 function Spinner() {

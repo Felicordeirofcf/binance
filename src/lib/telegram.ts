@@ -31,3 +31,22 @@ export const telegram: Notifier = async (kind, text) => {
 };
 
 export const silent: Notifier = async () => {};
+
+/** Envia uma mensagem de teste e devolve o erro da API, se houver. */
+export async function telegramTest(): Promise<{ ok: boolean; error?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chat = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chat) return { ok: false, error: "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID nao configurados na Vercel" };
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chat, text: "✅ TrendBot\nNotificacoes ligadas. Voce recebera entradas, saidas, erros e kill switch." }),
+      cache: "no-store",
+    });
+    const j = (await r.json()) as { ok: boolean; description?: string };
+    return j.ok ? { ok: true } : { ok: false, error: j.description ?? `HTTP ${r.status}` };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
