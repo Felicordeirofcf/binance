@@ -5,6 +5,7 @@ import type { DashboardState, LogView, OrderView } from "@/lib/dashboard-types";
 import EquityChart from "./EquityChart";
 import Radar from "./Radar";
 import { CapitalCard, ExpectationCard } from "./Capital";
+import ManualTrade from "./ManualTrade";
 import { ago, dt, pct, price, reason, usd } from "./format";
 import { AnimatedNumber, Badge, Button, Card, Meter, Modal, Stat, Tabs, Toasts, type ToastMsg } from "./ui";
 
@@ -177,7 +178,7 @@ export default function Dashboard() {
           </Stat>
         </Card>
         <Card delay={80}>
-          <Stat label="PnL realizado" tone={stats.realizedPnl >= 0 ? "up" : "down"} sub={`${stats.trades} trades fechados`}>
+          <Stat label="PnL realizado" tone={stats.realizedPnl >= 0 ? "up" : "down"} sub={stats.manualTrades ? `${stats.trades} estratégia · ${stats.manualTrades} manuais (${stats.manualPnl >= 0 ? "+" : ""}${usd(stats.manualPnl)})` : `${stats.trades} trades fechados`}>
             <AnimatedNumber value={stats.realizedPnl} format={(v) => `${v >= 0 ? "+" : ""}${usd(v)}`} />
           </Stat>
         </Card>
@@ -256,6 +257,11 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
+
+      {/* ---------- operacao manual ---------- */}
+      <Card title="Operação manual · entrar a qualquer momento" delay={340}>
+        <ManualTrade state={state} busy={busy !== null} control={control} />
+      </Card>
 
       {/* ---------- equity + capital ---------- */}
       <div className="grid gap-4 lg:grid-cols-3">
@@ -362,6 +368,8 @@ const LABEL: Record<string, string> = {
   reset_paper: "Reset da carteira",
   test_telegram: "Teste do Telegram",
   set_capital: "Capital alocado",
+  manual_buy: "Compra manual",
+  close_position: "Posição encerrada",
 };
 
 function Spinner() {
@@ -389,7 +397,7 @@ function PositionsTable({ state }: { state: DashboardState }) {
             const pnl = p.status === "open" ? (px ? (px - p.entry_price) * p.qty : null) : p.pnl_usdt;
             return (
               <tr key={p.id} className="transition hover:bg-white/[0.03]">
-                <td className={td}><span className="font-semibold text-slate-100">{p.symbol}</span> {p.dry_run && <span className="ml-1 text-[10px] text-amber-300/80">papel</span>}</td>
+                <td className={td}><span className="font-semibold text-slate-100">{p.symbol}</span> {p.origin === "manual" && <span className="ml-1 text-[10px] text-sky-300/90">manual</span>} {p.dry_run && <span className="ml-1 text-[10px] text-amber-300/80">papel</span>}</td>
                 <td className={td}>{p.status === "open" ? <Badge tone="accent" pulse>aberta</Badge> : <Badge>fechada</Badge>}</td>
                 <td className={td}>{p.qty}</td>
                 <td className={td}>{price(p.entry_price)}</td>

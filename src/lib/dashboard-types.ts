@@ -38,6 +38,9 @@ export type PositionView = {
   entry_price: number;
   stop_price: number;
   entry_candle_time: number;
+  origin: "strategy" | "manual";
+  target_price: number | null;
+  trailing: boolean;
   opened_at: string;
   closed_at: string | null;
   exit_price: number | null;
@@ -99,6 +102,8 @@ export type DashboardState = {
     accountEquity: number | null;
     drawdownPct: number | null;
     realizedPnl: number;
+    manualPnl: number;
+    manualTrades: number;
     trades: number;
     winRate: number | null;
     profitFactor: number | null;

@@ -65,6 +65,13 @@ create table if not exists positions (
   pnl_usdt              numeric
 );
 
+-- strategy = aberta pela regra; manual = aberta pelo painel (fora da estrategia)
+alter table positions add column if not exists origin text not null default 'strategy';
+alter table positions drop constraint if exists positions_origin_check;
+alter table positions add constraint positions_origin_check check (origin in ('strategy','manual'));
+alter table positions add column if not exists target_price numeric;  -- alvo (so manual)
+alter table positions add column if not exists trailing boolean not null default true;
+
 -- uma posicao aberta por simbolo, garantido pelo banco
 create unique index if not exists one_open_position_per_symbol
   on positions (symbol) where status = 'open';

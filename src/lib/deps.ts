@@ -1,5 +1,5 @@
 import "server-only";
-import { getClosedCandles, getFilters } from "./binance";
+import { getClosedCandles, getFilters, getPrice } from "./binance";
 import { LiveBroker } from "./broker";
 import type { EngineDeps } from "./engine";
 import { SupabaseStore } from "./supabase";
@@ -12,6 +12,6 @@ export function engineDeps(): EngineDeps {
     notify: telegram,
     liveBroker: () => new LiveBroker(),
     paperInitialUsdt: Number(process.env.PAPER_INITIAL_USDT || 1000),
-    market: { getClosedCandles, getFilters },
+    market: { getClosedCandles, getFilters, getPrice },
   };
 }

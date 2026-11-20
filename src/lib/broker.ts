@@ -76,6 +76,11 @@ export class PaperBroker implements Broker {
     return { ...this.state, orders: [...closed, ...open] };
   }
 
+  /** Preco atual (ticker) para execucao de ordens manuais em papel. */
+  setPrice(symbol: string, price: number): void {
+    if (price > 0) this.lastPrice[symbol] = price;
+  }
+
   /** Alimenta precos e dispara stops simulados com candles fechados. */
   sync(symbol: string, candles: Candle[]): void {
     const last = candles[candles.length - 1];

@@ -17,6 +17,8 @@ type Body =
   | { action: "run_now" }
   | { action: "test_telegram" }
   | { action: "set_capital"; capital: number | null }
+  | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; confirm: string }
+  | { action: "close_position"; symbol: string; confirm: string }
   | { action: "to_dry_run" }
   | { action: "reset_paper"; confirm: string };
 
@@ -91,6 +93,29 @@ export async function POST(req: Request) {
           depois: capital,
         });
         return NextResponse.json({ ok: true });
+      }
+
+      case "manual_buy": {
+        if (body.confirm !== "COMPRAR") return NextResponse.json({ error: "confirmacao invalida" }, { status: 400 });
+        const result = await runOnce(engineDeps(), {
+          manual: {
+            type: "buy",
+            symbol: String(body.symbol).toUpperCase(),
+            notionalUsdt: Number(body.notionalUsdt),
+            stopPct: Number(body.stopPct),
+            targetPct: body.targetPct === null || body.targetPct === undefined ? null : Number(body.targetPct),
+            trailing: body.trailing === true,
+          },
+        });
+        if (result.status === "locked") return NextResponse.json({ error: "outra execucao em andamento, tente em 1 minuto" }, { status: 409 });
+        return NextResponse.json({ ok: true, result });
+      }
+
+      case "close_position": {
+        if (body.confirm !== "ENCERRAR") return NextResponse.json({ error: "confirmacao invalida" }, { status: 400 });
+        const result = await runOnce(engineDeps(), { manual: { type: "close", symbol: String(body.symbol).toUpperCase() } });
+        if (result.status === "locked") return NextResponse.json({ error: "outra execucao em andamento, tente em 1 minuto" }, { status: 409 });
+        return NextResponse.json({ ok: true, result });
       }
 
       case "to_dry_run":

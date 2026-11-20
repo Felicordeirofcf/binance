@@ -67,8 +67,8 @@ export function checkKillSwitch(
   return { killed: false, drawdownPct, peak };
 }
 
-export type OrderKind = "buy" | "sell" | "stop" | "rstop" | "kill" | "emsell";
-const KINDS: readonly OrderKind[] = ["buy", "sell", "stop", "rstop", "kill", "emsell"];
+export type OrderKind = "buy" | "sell" | "stop" | "rstop" | "kill" | "emsell" | "mbuy" | "msell";
+const KINDS: readonly OrderKind[] = ["buy", "sell", "stop", "rstop", "kill", "emsell", "mbuy", "msell"];
 
 /**
  * clientOrderId deterministico: tb_{tipo}_{symbol}_{candleOpenTime}.

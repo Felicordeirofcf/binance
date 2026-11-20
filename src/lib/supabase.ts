@@ -49,6 +49,9 @@ function toPosition(r: Record<string, unknown>): Position {
     entry_price: Number(r.entry_price),
     stop_price: Number(r.stop_price),
     entry_candle_time: Number(r.entry_candle_time),
+    origin: r.origin === "manual" ? "manual" : "strategy",
+    target_price: num(r.target_price),
+    trailing: r.trailing !== false,
   };
 }
 
@@ -105,7 +108,7 @@ export class SupabaseStore implements Store {
       .from("orders")
       .select("*")
       .eq("symbol", symbol)
-      .eq("kind", "buy")
+      .in("kind", ["buy", "mbuy"])
       .is("position_id", null)
       .not("status", "in", "(error,not_sent,CANCELED,REJECTED,EXPIRED)")
       .order("created_at", { ascending: false })

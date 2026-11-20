@@ -22,7 +22,17 @@ import type { Balances, BotConfig, Candle, ExchangeOrder, Position, Signal, Symb
 export type MarketData = {
   getClosedCandles(symbol: string, interval: string, limit: number): Promise<Candle[]>;
   getFilters(symbol: string): Promise<SymbolFilters>;
+  /** preco atual (ticker), usado nas operacoes manuais */
+  getPrice?(symbol: string): Promise<number>;
 };
+
+/** Operacao pedida pelo painel, fora da estrategia. */
+export type ManualRequest =
+  | { type: "buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean }
+  | { type: "close"; symbol: string };
+
+/** Teto de perda ate o stop numa entrada manual (% do capital do bot). */
+export const MANUAL_MAX_LOSS_PCT = 5;
 
 export type EngineDeps = {
   store: Store;
@@ -47,6 +57,7 @@ export type RunResult = {
   drawdownPct?: number;
   symbols: SymbolReport[];
   killReason?: string | null;
+  manual?: string;
 };
 
 const INTERVAL_MS: Record<string, number> = {
@@ -76,7 +87,7 @@ type Ctx = {
 
 // ------------------------------------------------------------------ entrada
 
-export async function runOnce(deps: EngineDeps, opts: { forceKill?: string } = {}): Promise<RunResult> {
+export async function runOnce(deps: EngineDeps, opts: RunOptions = {}): Promise<RunResult> {
   const { store } = deps;
   if (!(await store.acquireLock(LOCK_TTL_MS))) {
     await store.log("warn", "execucao ignorada: outra execucao em andamento (lock)");
@@ -94,6 +105,8 @@ export async function runOnce(deps: EngineDeps, opts: { forceKill?: string } = {
   }
 }
 
+export type RunOptions = { forceKill?: string; manual?: ManualRequest };
+
 export function validateConfig(cfg: BotConfig): void {
   if (!cfg.symbols?.length) throw new Error("config: nenhum symbol");
   for (const s of cfg.symbols) baseAsset(s);
@@ -103,7 +116,7 @@ export function validateConfig(cfg: BotConfig): void {
   if (!(cfg.max_drawdown_pct > 0 && cfg.max_drawdown_pct < 100)) throw new Error("config: max_drawdown_pct invalido");
 }
 
-async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promise<RunResult> {
+async function runLocked(deps: EngineDeps, opts: RunOptions): Promise<RunResult> {
   const now = deps.now ?? Date.now;
   const cfg = await deps.store.getConfig();
   validateConfig(cfg);
@@ -137,6 +150,13 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
     ctx.data[symbol] = { candles, filters };
     paperBroker?.sync(symbol, candles);
   }
+  if (opts.manual && !ctx.data[opts.manual.symbol]) throw new Error(`${opts.manual.symbol} nao esta em bot_config.symbols`);
+  // operacao manual executa no preco atual, nao no ultimo fechamento
+  let livePrice: number | null = null;
+  if (opts.manual?.type === "buy" && deps.market.getPrice) {
+    livePrice = await deps.market.getPrice(opts.manual.symbol);
+    paperBroker?.setPrice(opts.manual.symbol, livePrice);
+  }
 
   // --- 1. reconciliacao: a exchange e a verdade ---
   const positions: Record<string, Position | null> = {};
@@ -149,6 +169,10 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
   const reports: SymbolReport[] = cfg.symbols.map((s) => ({ symbol: s, action: "nenhuma" }));
 
   if (cfg.killed_at) {
+    if (opts.manual?.type === "buy") throw new Error("kill switch ativo: rearme antes de abrir posicao");
+    if (opts.manual?.type === "close" && positions[opts.manual.symbol]) {
+      await exitPosition(ctx, opts.manual.symbol, positions[opts.manual.symbol]!, "manual", "msell", minuteKey(now()));
+    }
     await snapshot(ctx, eq, cfg.peak_equity ?? eq.equity);
     await ctx.persistPaper();
     return { status: "killed", mode, equity: eq.equity, symbols: reports, killReason: cfg.kill_reason };
@@ -172,6 +196,27 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
   }
   if (cfg.peak_equity === null || kc.peak > cfg.peak_equity) await ctx.store.updateConfig({ peak_equity: kc.peak });
 
+  // --- operacao manual: substitui a etapa da estrategia nesta execucao ---
+  if (opts.manual) {
+    const m = opts.manual;
+    let manual: string;
+    if (m.type === "close") {
+      const pos = positions[m.symbol];
+      if (!pos) throw new Error(`${m.symbol}: nenhuma posicao aberta para encerrar`);
+      manual = await exitPosition(ctx, m.symbol, pos, "manual", "msell", minuteKey(now()));
+    } else {
+      manual = await manualBuy(ctx, m, eq, livePrice ?? lastCandle(ctx, m.symbol).close);
+    }
+    balances = await broker.getBalances();
+    const after: Record<string, Position | null> = {};
+    for (const s of cfg.symbols) after[s] = await ctx.store.getOpenPosition(s);
+    eq = await computeEquity(ctx, balances, after);
+    const peak = Math.max(kc.peak, eq.equity);
+    await snapshot(ctx, eq, peak);
+    await ctx.persistPaper();
+    return { status: "ok", mode, equity: eq.equity, drawdownPct: (eq.equity / peak - 1) * 100, symbols: reports, manual };
+  }
+
   // --- 3. avalia e executa ---
   for (const [k, symbol] of cfg.symbols.entries()) {
     const { candles } = ctx.data[symbol];
@@ -184,7 +229,15 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
       reports[k].action = "bot_desligado";
       continue;
     }
-    if (pos) {
+    if (pos && pos.origin === "manual") {
+      // posicao manual: a regra de saida da estrategia NAO se aplica.
+      // Sai pelo stop (no servidor), pelo alvo ou pelo botao do painel.
+      if (pos.target_price !== null && sig.close >= pos.target_price) {
+        reports[k].action = await exitPosition(ctx, symbol, pos, "alvo", "sell", sig.candleTime);
+      } else {
+        reports[k].action = pos.trailing ? await trailStop(ctx, symbol, pos, sig) : "manual_mantem";
+      }
+    } else if (pos) {
       reports[k].action =
         sig.action === "sell"
           ? await exitPosition(ctx, symbol, pos, "saida_donchian", "sell", sig.candleTime)
@@ -212,6 +265,10 @@ async function runLocked(deps: EngineDeps, opts: { forceKill?: string }): Promis
 }
 
 // --------------------------------------------------------------- auxiliares
+
+function minuteKey(t: number): number {
+  return Math.floor(t / 60_000) * 60_000;
+}
 
 function hourKey(t: number): number {
   return Math.floor(t / 3_600_000) * 3_600_000;
@@ -498,12 +555,14 @@ async function openFromFill(
   order: ExchangeOrder,
   candleTime: number,
   atrValue: number,
+  manual?: { stopPct: number; targetPct: number | null; trailing: boolean },
 ): Promise<Position | null> {
   const f = ctx.data[symbol].filters;
   const fill = avgFillPrice(order);
   // comissao cobrada no ativo comprado reduz o que pode ser vendido
   const qty = roundStep(Number(order.executedQty) - commissionIn(order, baseAsset(symbol)), f.stepSize);
-  const stop = roundStep(initialStop(fill, atrValue, ctx.cfg.atr_mult), f.tickSize);
+  const stop = roundStep(manual ? fill * (1 - manual.stopPct / 100) : initialStop(fill, atrValue, ctx.cfg.atr_mult), f.tickSize);
+  const target = manual?.targetPct ? roundStep(fill * (1 + manual.targetPct / 100), f.tickSize) : null;
 
   let pos = await ctx.store.insertPosition({
     symbol,
@@ -515,6 +574,9 @@ async function openFromFill(
     stop_client_order_id: null,
     entry_client_order_id: order.clientOrderId,
     entry_candle_time: Number(candleTime),
+    origin: manual || order.clientOrderId.startsWith("tb_mbuy_") ? "manual" : "strategy",
+    target_price: target,
+    trailing: manual ? manual.trailing : !order.clientOrderId.startsWith("tb_mbuy_"),
   });
   await ctx.store.updateOrder(order.clientOrderId, { position_id: pos.id });
 
@@ -530,7 +592,7 @@ async function openFromFill(
   await ctx.store.log("info", `${symbol}: ENTRADA ${qty} @ ${fill} stop ${stop}`, { orderId: order.orderId });
   await ctx.notify(
     "entrada",
-    `${symbol} COMPRA${ctx.paper ? " [dry-run]" : ""}\nqty ${qty} @ ${fill.toFixed(2)}\nstop ${stop} (no servidor)\nrisco ~ ${((fill - stop) * qty).toFixed(2)} USDT`,
+    `${symbol} COMPRA${manual ? " MANUAL" : ""}${ctx.paper ? " [dry-run]" : ""}\nqty ${qty} @ ${fill.toFixed(2)}\nstop ${stop} (no servidor)\nrisco ~ ${((fill - stop) * qty).toFixed(2)} USDT`,
   );
   return pos;
 }
@@ -573,6 +635,43 @@ async function enterPosition(ctx: Ctx, symbol: string, sig: Signal, eq: Equity):
   return pos ? "comprou" : "comprou_e_saiu_stop_rejeitado";
 }
 
+async function manualBuy(
+  ctx: Ctx,
+  m: Extract<ManualRequest, { type: "buy" }>,
+  eq: Equity,
+  price: number,
+): Promise<string> {
+  const { symbol } = m;
+  const f = ctx.data[symbol].filters;
+  if (await ctx.store.getOpenPosition(symbol)) throw new Error(`${symbol}: ja existe posicao aberta (uma por simbolo)`);
+  if (!(m.stopPct >= 0.3 && m.stopPct <= 50)) throw new Error("stop deve ficar entre 0,3% e 50% abaixo da entrada");
+  if (m.targetPct !== null && !(m.targetPct >= 0.3 && m.targetPct <= 1000)) throw new Error("alvo deve ficar entre 0,3% e 1000% acima");
+  if (!(m.notionalUsdt > 0)) throw new Error("valor invalido");
+
+  const balances = await ctx.broker.getBalances();
+  const cash = Math.min(balances[QUOTE]?.free ?? 0, eq.cashAvailable) * 0.99; // folga p/ taxa
+  if (m.notionalUsdt > cash) throw new Error(`valor acima do caixa disponivel do bot (${cash.toFixed(2)} USDT)`);
+  const qty = roundStep(m.notionalUsdt / price, f.stepSize);
+  if (qty < f.minQty || qty * price < f.minNotional) throw new Error(`abaixo do minimo da Binance (${f.minNotional} USDT)`);
+  const lossAtStop = qty * price * (m.stopPct / 100);
+  if (lossAtStop > eq.equity * (MANUAL_MAX_LOSS_PCT / 100)) {
+    throw new Error(`perda ate o stop (${lossAtStop.toFixed(2)} USDT) passa de ${MANUAL_MAX_LOSS_PCT}% do capital do bot`);
+  }
+
+  const key = minuteKey(ctx.now()); // duplo clique no mesmo minuto nao gera 2 ordens
+  const res = await submit(
+    ctx,
+    { kind: "mbuy", symbol, key, side: "BUY", type: "MARKET", qty },
+    (cid) => ctx.broker.marketOrder(symbol, "BUY", fmt(qty, f.stepSize), cid),
+  );
+  if (res.reused) return "compra_manual_ja_enviada_neste_minuto";
+  if (res.order.status !== "FILLED") return `compra_${res.order.status}`;
+  await ctx.store.log("info", `${symbol}: ENTRADA MANUAL pelo painel`, { notional: m.notionalUsdt, stopPct: m.stopPct, targetPct: m.targetPct });
+  const atrNow = atr(ctx.data[symbol].candles, ctx.cfg.atr_period);
+  const pos = await openFromFill(ctx, symbol, res.order, lastCandle(ctx, symbol).openTime, atrNow[atrNow.length - 1], m);
+  return pos ? "comprou_manual" : "comprou_e_saiu_stop_rejeitado";
+}
+
 async function trailStop(ctx: Ctx, symbol: string, pos: Position, sig: Signal): Promise<string> {
   const f = ctx.data[symbol].filters;
   const target = roundStep(nextStop(pos.stop_price, sig.close, sig.atr, ctx.cfg.atr_mult), f.tickSize);
@@ -612,7 +711,7 @@ async function exitPosition(
   symbol: string,
   pos: Position,
   reason: string,
-  kind: "sell" | "kill" | "emsell",
+  kind: "sell" | "kill" | "emsell" | "msell",
   key: number,
 ): Promise<string> {
   const f = ctx.data[symbol].filters;

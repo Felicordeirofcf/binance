@@ -99,6 +99,26 @@ export async function getClosedCandles(symbol: string, interval: string, limit =
   return dropOpenCandle(raw.map(mapKline), Date.now());
 }
 
+/** Historico longo de candles fechados (paginado para tras). So para analise no painel. */
+export async function getClosedHistory(symbol: string, interval: string, total = 3000): Promise<Candle[]> {
+  let out: Candle[] = [];
+  let endTime: number | undefined;
+  while (out.length < total) {
+    const params: Record<string, string | number> = { symbol, interval, limit: 1000 };
+    if (endTime) params.endTime = endTime;
+    const raw = await publicGet<unknown[][]>("/api/v3/klines", params);
+    if (!raw.length) break;
+    out = [...raw.map(mapKline), ...out];
+    endTime = Number(raw[0][0]) - 1;
+    if (raw.length < 1000) break;
+  }
+  const seen = new Set<number>();
+  return out
+    .filter((c) => (seen.has(c.openTime) ? false : (seen.add(c.openTime), true)))
+    .filter((c) => c.closeTime < Date.now())
+    .slice(-total);
+}
+
 /** Klines brutos (inclui o candle aberto). SO para exibicao no painel. */
 export async function getKlinesForDisplay(symbol: string, interval: string, limit = 500): Promise<Candle[]> {
   const raw = await publicGet<unknown[][]>("/api/v3/klines", { symbol, interval, limit });

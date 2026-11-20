@@ -151,7 +151,7 @@ export class MemoryStore implements Store {
   }
   async findUnlinkedEntries(symbol: string) {
     return this.orders.filter(
-      (o) => o.symbol === symbol && o.kind === "buy" && !o.position_id && !["error", "not_sent", "CANCELED", "REJECTED", "EXPIRED"].includes(o.status),
+      (o) => o.symbol === symbol && (o.kind === "buy" || o.kind === "mbuy") && !o.position_id && !["error", "not_sent", "CANCELED", "REJECTED", "EXPIRED"].includes(o.status),
     );
   }
   async realizedPnlSince(since: string, dryRun: boolean) {

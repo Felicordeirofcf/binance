@@ -37,8 +37,10 @@ export default function Radar({ view, position, capital }: { view: SymbolView; p
   if (!r) return <div className="text-sm text-slate-500">{view.error ? `Erro: ${view.error}` : "Sem dados suficientes."}</div>;
   const toBreak = r.dcHigh ? (r.close / r.dcHigh - 1) * 100 : 0;
   const toEma = (r.close / r.ema - 1) * 100;
-  const verdict =
-    r.action === "buy"
+  const manual = position?.origin === "manual";
+  const verdict = manual
+    ? { tone: "warn" as const, text: "POSIÇÃO MANUAL" }
+    : r.action === "buy"
       ? { tone: "up" as const, text: "SINAL DE COMPRA" }
       : r.action === "sell"
         ? { tone: "down" as const, text: "SINAL DE SAÍDA" }
@@ -49,8 +51,8 @@ export default function Radar({ view, position, capital }: { view: SymbolView; p
   return (
     <div className="space-y-2.5">
       <div className="flex items-center justify-between">
-        <Badge tone={verdict.tone} pulse={r.action !== "hold"}>{verdict.text}</Badge>
-        <span className="text-xs text-slate-500">{reason(r.reason)}</span>
+        <Badge tone={verdict.tone} pulse={!manual && r.action !== "hold"}>{verdict.text}</Badge>
+        <span className="text-xs text-slate-500">{manual ? "sai pelo stop, alvo ou por você" : reason(r.reason)}</span>
       </div>
 
       {!r.hasPosition ? (
@@ -70,9 +72,9 @@ export default function Radar({ view, position, capital }: { view: SymbolView; p
         </>
       ) : (
         <>
-          <Row ok={!(r.dcLow && r.close < r.dcLow)} label="Acima da mínima de saída" detail={`${pct(r.dcLow ? (r.close / r.dcLow - 1) * 100 : null)} vs ${price(r.dcLow)}`}>
+          {!manual && <Row ok={!(r.dcLow && r.close < r.dcLow)} label="Acima da mínima de saída" detail={`${pct(r.dcLow ? (r.close / r.dcLow - 1) * 100 : null)} vs ${price(r.dcLow)}`}>
             <Gap value={r.dcLow ? (r.close / r.dcLow - 1) * 100 : 0} />
-          </Row>
+          </Row>}
           {position && (
             <Row ok={r.close > position.stop_price} label="Distância até o stop" detail={`${pct((r.close / position.stop_price - 1) * 100)} · ${price(position.stop_price)}`}>
               <Gap value={(r.close / position.stop_price - 1) * 100} span={10} />

@@ -46,6 +46,12 @@ export type Position = {
   stop_client_order_id: string | null;
   entry_client_order_id: string | null;
   entry_candle_time: number;
+  /** strategy = aberta pela regra; manual = aberta por voce no painel */
+  origin: "strategy" | "manual";
+  /** alvo de lucro (so manual); verificado no fechamento de cada candle */
+  target_price: number | null;
+  /** stop movel (ATR) ligado? strategy sempre; manual opcional */
+  trailing: boolean;
   opened_at: string;
   closed_at?: string | null;
   exit_price?: number | null;

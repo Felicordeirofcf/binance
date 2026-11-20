@@ -107,13 +107,19 @@ export async function buildDashboard(): Promise<DashboardState> {
     entry_price: Number(p.entry_price),
     stop_price: Number(p.stop_price),
     entry_candle_time: Number(p.entry_candle_time),
+    origin: p.origin === "manual" ? "manual" : "strategy",
+    target_price: n(p.target_price),
+    trailing: p.trailing !== false,
     opened_at: String(p.opened_at),
     closed_at: (p.closed_at as string) ?? null,
     exit_price: n(p.exit_price),
     exit_reason: (p.exit_reason as string) ?? null,
     pnl_usdt: n(p.pnl_usdt),
   }));
-  const closed = positions.filter((p) => p.status === "closed" && p.pnl_usdt !== null && p.dry_run === cfg.dry_run);
+  const closedAll = positions.filter((p) => p.status === "closed" && p.pnl_usdt !== null && p.dry_run === cfg.dry_run);
+  // metricas da estrategia nao misturam trades manuais (nao validados no backtest)
+  const closed = closedAll.filter((p) => p.origin !== "manual");
+  const manualClosed = closedAll.filter((p) => p.origin === "manual");
   const wins = closed.filter((p) => (p.pnl_usdt ?? 0) > 0);
   const gross = wins.reduce((s, p) => s + (p.pnl_usdt ?? 0), 0);
   const loss = -closed.filter((p) => (p.pnl_usdt ?? 0) <= 0).reduce((s, p) => s + (p.pnl_usdt ?? 0), 0);
@@ -150,7 +156,9 @@ export async function buildDashboard(): Promise<DashboardState> {
       equity: lastEq ? Number(lastEq.equity_usdt) : null,
       accountEquity: lastEq && lastEq.account_equity !== null ? Number(lastEq.account_equity) : null,
       drawdownPct: lastEq ? Number(lastEq.drawdown_pct) : null,
-      realizedPnl: closed.reduce((s, p) => s + (p.pnl_usdt ?? 0), 0),
+      realizedPnl: closedAll.reduce((s, p) => s + (p.pnl_usdt ?? 0), 0),
+      manualPnl: manualClosed.reduce((s, p) => s + (p.pnl_usdt ?? 0), 0),
+      manualTrades: manualClosed.length,
       trades: closed.length,
       winRate: closed.length ? (wins.length / closed.length) * 100 : null,
       profitFactor: loss > 0 ? gross / loss : null,
