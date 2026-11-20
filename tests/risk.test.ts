@@ -137,3 +137,26 @@ describe("cliente Binance", () => {
     expect(dropOpenCandle(cs, cs[1].closeTime - 1).length).toBe(1);
   });
 });
+
+import { sizeFixed } from "@/lib/risk";
+describe("valor fixo por entrada", () => {
+  it("compra o valor escolhido e informa a perda no stop", () => {
+    // 100 USDT a 50000 = 0.002; stop 2x500 = 1000 abaixo -> perde 2 USDT
+    const r = sizeFixed(100, 1000, 10_000, 50_000, 500, 2, filters);
+    expect(r.ok && r.qty).toBe(0.002);
+    expect(r.ok && r.riskUsdt).toBeCloseTo(2, 6);
+  });
+  it("recusa se a perda no stop passar de 5% do capital", () => {
+    const r = sizeFixed(1000, 300, 10_000, 50_000, 500, 2, filters); // perde 20 > 15
+    expect(r.ok).toBe(false);
+  });
+  it("limita ao poder de compra e respeita o minimo da exchange", () => {
+    const r = sizeFixed(1000, 100_000, 200, 50_000, 500, 2, filters);
+    expect(r.ok && r.notional).toBeLessThanOrEqual(200);
+    expect(sizeFixed(3, 1000, 1000, 50_000, 500, 2, filters).ok).toBe(false);
+  });
+  it("vendido: stop acima", () => {
+    const r = sizeFixed(100, 1000, 1000, 50_000, 500, 2, filters, "short");
+    expect(r.ok && r.stop).toBe(51_000);
+  });
+});

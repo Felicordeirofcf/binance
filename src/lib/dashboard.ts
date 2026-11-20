@@ -114,6 +114,8 @@ export async function buildDashboard(): Promise<DashboardState> {
     market: (c.market === "futures" ? "futures" : "spot") as "spot" | "futures",
     leverage: Number(c.leverage ?? 1),
     short_enabled: c.short_enabled === true,
+    take_profit_pct: n(c.take_profit_pct),
+    entry_usdt: n(c.entry_usdt),
     capital_set_at: (c.capital_set_at as string) ?? null,
   };
 
@@ -173,6 +175,8 @@ export async function buildDashboard(): Promise<DashboardState> {
       market: cfg.market,
       leverage: cfg.leverage,
       short_enabled: cfg.short_enabled,
+      take_profit_pct: cfg.take_profit_pct,
+      entry_usdt: cfg.entry_usdt,
       capital_set_at: cfg.capital_set_at,
       peak_equity: cfg.peak_equity,
       killed_at: cfg.killed_at,

@@ -16,7 +16,7 @@
 import { fmt, roundStep } from "./binance";
 import { baseAsset, type Broker } from "./broker";
 import { atr } from "./indicators";
-import { allocatedEquity, checkKillSwitch, clientOrderId, sizePosition, type OrderKind } from "./risk";
+import { allocatedEquity, checkKillSwitch, clientOrderId, sizeFixed, sizePosition, type OrderKind } from "./risk";
 import type { OrderRow, Store } from "./store";
 import { evaluate, evaluateShort, initialStop, nextStop, nextStopShort } from "./strategy";
 import type { Notifier } from "./telegram";
@@ -288,6 +288,9 @@ async function runLocked(deps: EngineDeps, opts: RunOptions): Promise<RunResult>
       const hit = pos.target_price !== null && (pos.side === "long" ? sig.close >= pos.target_price : sig.close <= pos.target_price);
       if (hit) reports[k].action = await exitPosition(ctx, symbol, pos, "alvo", pos.side === "long" ? "sell" : "cover", sig.candleTime);
       else reports[k].action = pos.trailing_stop ? await trailStop(ctx, symbol, pos, sig) : "manual_mantem";
+    } else if (pos && pos.target_price !== null && (pos.side === "long" ? sig.close >= pos.target_price : sig.close <= pos.target_price)) {
+      // estrategia com "realizar lucro em X%": alvo conferido no fechamento do candle
+      reports[k].action = await exitPosition(ctx, symbol, pos, "alvo", pos.side === "long" ? "sell" : "cover", sig.candleTime);
     } else if (pos && pos.side === "long") {
       reports[k].action = long.action === "sell" ? await exitPosition(ctx, symbol, pos, "saida_donchian", "sell", long.candleTime) : await trailStop(ctx, symbol, pos, long);
     } else if (pos && pos.side === "short") {
@@ -645,7 +648,8 @@ async function openFromFill(
     manual ? px * (1 - (s * manual.stopPct) / 100) : side === "long" ? initialStop(px, atrValue, ctx.cfg.atr_mult) : px + ctx.cfg.atr_mult * atrValue,
     f.tickSize,
   );
-  const target = manual?.targetPct ? roundStep(px * (1 + (s * manual.targetPct) / 100), f.tickSize) : null;
+  const tpPct = manual ? manual.targetPct : ctx.cfg.take_profit_pct;
+  const target = tpPct ? roundStep(px * (1 + (s * tpPct) / 100), f.tickSize) : null;
   const isManual = Boolean(manual) || /^tb_m(buy|short)_/.test(fill.cid);
 
   let pos = await ctx.store.insertPosition({
@@ -717,7 +721,9 @@ async function enterPosition(ctx: Ctx, symbol: string, sig: Signal, side: Side):
   // ter consumido caixa. Com capital alocado, o bot nao usa alem dele.
   const eq = await freshEquity(ctx);
   const buyingPower = eq.cashAvailable * lev;
-  const sz = sizePosition(eq.equity, buyingPower, sig.close, sig.atr, cfg, ctx.data[symbol].filters, side);
+  const sz = cfg.entry_usdt
+    ? sizeFixed(cfg.entry_usdt, eq.equity, buyingPower, sig.close, sig.atr, cfg.atr_mult, ctx.data[symbol].filters, side)
+    : sizePosition(eq.equity, buyingPower, sig.close, sig.atr, cfg, ctx.data[symbol].filters, side);
   if (!sz.ok) {
     await ctx.store.log("info", `${symbol}: entrada nao executada (${sz.reason})`);
     return `sem_entrada:${sz.reason}`;

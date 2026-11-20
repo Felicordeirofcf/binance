@@ -89,6 +89,8 @@ export const DEFAULT_CONFIG: BotConfig = {
   market: "spot",
   leverage: 1,
   short_enabled: false,
+  take_profit_pct: null,
+  entry_usdt: null,
   paper_futures_state: null,
   stop_limit_buffer_pct: 0.005,
   peak_equity: null,

@@ -106,3 +106,36 @@ export function allocatedEquity(
   if (capitalUsdt === null || !(capitalUsdt > 0)) return accountEquity;
   return Math.max(0, Math.min(accountEquity, capitalUsdt + realizedSince + unrealized));
 }
+
+/** Teto de perda no stop com valor fixo por entrada (% do capital do bot). */
+export const FIXED_ENTRY_MAX_LOSS_PCT = 5;
+
+/**
+ * Sizing por VALOR FIXO por entrada (opcao do usuario; o testado e o sizing
+ * por risco). A perda no stop varia com a volatilidade: valor x distancia do
+ * stop. Recusa se passar de FIXED_ENTRY_MAX_LOSS_PCT do capital.
+ */
+export function sizeFixed(
+  entryUsdt: number,
+  equity: number,
+  buyingPower: number,
+  price: number,
+  atrValue: number,
+  atrMult: number,
+  filters: SymbolFilters,
+  side: "long" | "short" = "long",
+): SizingResult {
+  if (!(entryUsdt > 0) || !(price > 0)) return { ok: false, reason: "valor_invalido" };
+  const stop = side === "long" ? price - atrMult * atrValue : price + atrMult * atrValue;
+  if (!(stop > 0)) return { ok: false, reason: "atr_invalido" };
+  const notionalWanted = Math.min(entryUsdt, buyingPower * 0.99);
+  const qty = roundStep(notionalWanted / price, filters.stepSize);
+  const notional = qty * price;
+  if (qty <= 0 || qty < filters.minQty) return { ok: false, reason: "qty_abaixo_do_minimo" };
+  if (notional < filters.minNotional) return { ok: false, reason: `notional_${notional.toFixed(2)}_abaixo_do_minimo_${filters.minNotional}` };
+  const riskUsdt = qty * Math.abs(price - stop);
+  if (riskUsdt > equity * (FIXED_ENTRY_MAX_LOSS_PCT / 100)) {
+    return { ok: false, reason: `perda_no_stop_${riskUsdt.toFixed(2)}_passa_de_${FIXED_ENTRY_MAX_LOSS_PCT}pct_do_capital` };
+  }
+  return { ok: true, qty, stop, notional, riskUsdt };
+}

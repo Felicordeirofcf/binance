@@ -34,6 +34,10 @@ export type BotConfig = {
   leverage: number;
   /** bot pode abrir vendido (so futuros). Reprovou no walk-forward. */
   short_enabled: boolean;
+  /** realizar lucro automatico da estrategia em X% de movimento do preco (null = deixa correr) */
+  take_profit_pct: number | null;
+  /** valor fixo (USDT, nocional) por entrada automatica; null = sizing por risco (o testado) */
+  entry_usdt: number | null;
   paper_futures_state: unknown;
   stop_limit_buffer_pct: number;
   peak_equity: number | null;

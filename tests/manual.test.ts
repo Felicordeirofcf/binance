@@ -107,6 +107,21 @@ describe("entrada manual", () => {
   });
 });
 
+describe("realizar lucro automatico da estrategia", () => {
+  it("com take_profit_pct as posicoes do bot ganham alvo e saem nele", async () => {
+    const store = new MemoryStore({ enabled: true, max_position_usdt: 1_000_000, take_profit_pct: 1 });
+    const { deps, at } = h(store, 205);
+    for (; at.i < ALL.length; at.i++) await runOnce(deps);
+    const strat = store.positions.filter((p) => p.origin === "strategy");
+    expect(strat.length).toBeGreaterThan(5);
+    for (const p of strat) expect(p.target_price! / p.entry_price).toBeCloseTo(1.01, 3);
+    const alvos = strat.filter((p) => p.exit_reason === "alvo");
+    expect(alvos.length).toBeGreaterThan(0);
+    // saiu no alvo = fechou acima dele (com slippage de saida)
+    for (const p of alvos) expect(p.exit_price!).toBeGreaterThan(p.entry_price);
+  });
+});
+
 describe("simulacao historica de entrada", () => {
   // sobe 1% por candle: alvo de 3% sempre bate antes do stop
   const up = Array.from({ length: 60 }, (_, i) => {

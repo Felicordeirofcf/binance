@@ -54,6 +54,14 @@ alter table bot_config add constraint leverage_sane check (leverage >= 1 and lev
 -- bot vendido: reprovou no walk-forward (backtest/RESULTADOS.md). Default desligado.
 alter table bot_config add column if not exists short_enabled boolean not null default false;
 alter table bot_config add column if not exists paper_futures_state jsonb;
+-- realizar lucro automatico (% de movimento do preco); null = deixa correr (o testado)
+alter table bot_config add column if not exists take_profit_pct numeric;
+-- valor fixo por entrada automatica (USDT); null = sizing por risco de 1% (o testado)
+alter table bot_config add column if not exists entry_usdt numeric;
+alter table bot_config drop constraint if exists entry_usdt_sane;
+alter table bot_config add constraint entry_usdt_sane check (entry_usdt is null or entry_usdt >= 5);
+alter table bot_config drop constraint if exists take_profit_sane;
+alter table bot_config add constraint take_profit_sane check (take_profit_pct is null or (take_profit_pct >= 0.3 and take_profit_pct <= 100));
 
 -- ---------------------------------------------------------------
 -- 2. Posicoes

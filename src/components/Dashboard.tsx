@@ -7,6 +7,7 @@ import Radar from "./Radar";
 import { CapitalCard, ExpectationCard } from "./Capital";
 import ManualTrade from "./ManualTrade";
 import MarketCard from "./MarketCard";
+import AutoCard from "./AutoCard";
 import { setTheme, useTheme } from "./theme";
 import { ago, dt, pct, price, reason, usd } from "./format";
 import { AnimatedNumber, Badge, Button, Card, Meter, Modal, Stat, Tabs, Toasts, type ToastMsg } from "./ui";
@@ -31,6 +32,18 @@ export default function Dashboard() {
   const [, force] = useState(0);
   const loading = useRef(false);
   const theme = useTheme();
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    try {
+      setFull(localStorage.getItem("trendbot-view") === "full");
+    } catch {}
+  }, []);
+  const setView = (v: "simple" | "full") => {
+    setFull(v === "full");
+    try {
+      localStorage.setItem("trendbot-view", v);
+    } catch {}
+  };
 
   const toast = useCallback((tone: ToastMsg["tone"], text: string) => {
     const id = Date.now() + Math.random();
@@ -210,6 +223,11 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      {/* ---------- modo automatico (o essencial) ---------- */}
+      <Card title="Modo automático" delay={220} right={<Tabs value={full ? "full" : "simple"} onChange={setView} items={[{ id: "simple", label: "Simples" }, { id: "full", label: "Completo" }]} />}>
+        <AutoCard state={state} busy={busy !== null} control={control} />
+      </Card>
+
       {/* ---------- grafico + radar ---------- */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card
@@ -268,6 +286,8 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {full && (
+        <>
       {/* ---------- operacao manual ---------- */}
       <Card title="Operação manual · entrar a qualquer momento" delay={340}>
         <ManualTrade state={state} busy={busy !== null} control={control} />
@@ -322,6 +342,9 @@ export default function Dashboard() {
           </div>
         </Card>
       </div>
+
+        </>
+      )}
 
       {/* ---------- tabelas ---------- */}
       <Card

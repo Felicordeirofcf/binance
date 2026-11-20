@@ -42,6 +42,8 @@ function toConfig(r: Record<string, unknown>): BotConfig {
     market: r.market === "futures" ? "futures" : "spot",
     leverage: Number(r.leverage ?? 1),
     short_enabled: r.short_enabled === true,
+    take_profit_pct: num(r.take_profit_pct),
+    entry_usdt: num(r.entry_usdt),
   };
 }
 

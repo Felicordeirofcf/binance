@@ -17,6 +17,8 @@ type Body =
   | { action: "run_now" }
   | { action: "test_telegram" }
   | { action: "set_capital"; capital: number | null; max_position_usdt?: number }
+  | { action: "set_take_profit"; take_profit_pct: number | null }
+  | { action: "set_entry"; entry_usdt: number | null }
   | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; side?: "long" | "short"; leverage?: number; confirm: string }
   | { action: "set_market"; market: "spot" | "futures"; leverage: number; short_enabled: boolean; confirm: string }
   | { action: "close_position"; symbol: string; confirm: string }
@@ -150,6 +152,26 @@ export async function POST(req: Request) {
         await store.updateConfig(patch);
         await store.log("warn", `mercado: ${market}${market === "futures" ? ` ${leverage}x, vendido ${short ? "LIGADO" : "desligado"}` : ""}`, { antes: { market: cfg.market, leverage: cfg.leverage, short: cfg.short_enabled } });
         await runOnce(engineDeps(), { snapshotOnly: true });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "set_take_profit": {
+        const tp = body.take_profit_pct;
+        if (tp !== null && !(typeof tp === "number" && tp >= 0.3 && tp <= 100)) return NextResponse.json({ error: "alvo entre 0,3% e 100%" }, { status: 400 });
+        await store.updateConfig({ take_profit_pct: tp });
+        await store.log("warn", tp === null ? "realizar lucro: deixa correr (regra testada)" : `realizar lucro automatico em +${tp}% do preco`);
+        return NextResponse.json({ ok: true });
+      }
+
+      case "set_entry": {
+        const v = body.entry_usdt;
+        if (v !== null && !(typeof v === "number" && v >= 5 && v <= 10_000_000)) return NextResponse.json({ error: "valor por entrada entre 5 e 10.000.000 USDT" }, { status: 400 });
+        const entry = v === null ? null : Math.round(v * 100) / 100;
+        // valor fixo maior que o teto seria cortado em silencio: sobe o teto junto
+        const patch: Record<string, unknown> = { entry_usdt: entry };
+        if (entry !== null && entry > cfg.max_position_usdt) patch.max_position_usdt = entry;
+        await store.updateConfig(patch);
+        await store.log("warn", entry === null ? "entrada automatica: por risco de 1% (regra testada)" : `entrada automatica: valor fixo de ${entry} USDT`);
         return NextResponse.json({ ok: true });
       }
 

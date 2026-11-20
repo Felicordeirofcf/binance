@@ -103,6 +103,8 @@ export type DashboardState = {
     market: "spot" | "futures";
     leverage: number;
     short_enabled: boolean;
+    take_profit_pct: number | null;
+    entry_usdt: number | null;
     capital_set_at: string | null;
     peak_equity: number | null;
     killed_at: string | null;
