@@ -129,6 +129,18 @@ export default function AutoCard({ state, busy, control }: { state: DashboardSta
                 <Button tone="up" disabled={busy || !(entryN >= 5) || entryN === cfg.entry_usdt || tooRisky || belowMin} onClick={() => control("set_entry", { entry_usdt: Math.round(entryN * 100) / 100 })}>Salvar</Button>
               </div>
               <div className="flex flex-wrap gap-1.5">
+                {mo && (
+                  <button
+                    onClick={() => {
+                      // menor posicao aceita pela Binance, com 3% de folga (o preco anda ate a execucao)
+                      const minPos = Math.ceil(mo.minNotional * 1.03 * 100) / 100;
+                      setEntry(String(isMargin ? Math.ceil((minPos / lev) * 100) / 100 : minPos));
+                    }}
+                    className="rounded-lg bg-sky-500/10 px-2.5 py-1 text-xs text-sky-200 ring-1 ring-sky-400/30 hover:bg-sky-500/20"
+                  >
+                    mínimo da Binance
+                  </button>
+                )}
                 {[25, 50, 100, 200].map((v) => (
                   <button key={v} onClick={() => setEntry(String(v))} className="rounded-lg px-2.5 py-1 text-xs text-slate-300 ring-1 ring-white/10 hover:bg-white/10">{v} USDT</button>
                 ))}
