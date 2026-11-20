@@ -17,7 +17,8 @@ type Body =
   | { action: "run_now" }
   | { action: "test_telegram" }
   | { action: "set_capital"; capital: number | null }
-  | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; confirm: string }
+  | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; side?: "long" | "short"; leverage?: number; confirm: string }
+  | { action: "set_market"; market: "spot" | "futures"; leverage: number; short_enabled: boolean; confirm: string }
   | { action: "close_position"; symbol: string; confirm: string }
   | { action: "to_dry_run" }
   | { action: "reset_paper"; confirm: string };
@@ -105,6 +106,8 @@ export async function POST(req: Request) {
             stopPct: Number(body.stopPct),
             targetPct: body.targetPct === null || body.targetPct === undefined ? null : Number(body.targetPct),
             trailing: body.trailing === true,
+            side: body.side === "short" ? "short" : "long",
+            leverage: Number(body.leverage ?? 1),
           },
         });
         if (result.status === "locked") return NextResponse.json({ error: "outra execucao em andamento, tente em 1 minuto" }, { status: 409 });
@@ -116,6 +119,23 @@ export async function POST(req: Request) {
         const result = await runOnce(engineDeps(), { manual: { type: "close", symbol: String(body.symbol).toUpperCase() } });
         if (result.status === "locked") return NextResponse.json({ error: "outra execucao em andamento, tente em 1 minuto" }, { status: 409 });
         return NextResponse.json({ ok: true, result });
+      }
+
+      case "set_market": {
+        if (body.confirm !== "ALTERAR") return NextResponse.json({ error: "confirmacao invalida" }, { status: 400 });
+        const market = body.market === "futures" ? "futures" : "spot";
+        const leverage = Math.round(Number(body.leverage));
+        if (!(leverage >= 1 && leverage <= 10)) return NextResponse.json({ error: "alavancagem entre 1x e 10x" }, { status: 400 });
+        const short = market === "futures" && body.short_enabled === true;
+        if (market !== cfg.market && (await openCount()) > 0) {
+          return NextResponse.json({ error: "encerre as posicoes abertas antes de trocar de mercado" }, { status: 409 });
+        }
+        const patch: Record<string, unknown> = { market, leverage: market === "futures" ? leverage : 1, short_enabled: short };
+        // trocar de mercado = outra carteira: o drawdown recomeca
+        if (market !== cfg.market) patch.peak_equity = null;
+        await store.updateConfig(patch);
+        await store.log("warn", `mercado: ${market}${market === "futures" ? ` ${leverage}x, vendido ${short ? "LIGADO" : "desligado"}` : ""}`, { antes: { market: cfg.market, leverage: cfg.leverage, short: cfg.short_enabled } });
+        return NextResponse.json({ ok: true });
       }
 
       case "to_dry_run":

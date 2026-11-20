@@ -26,6 +26,8 @@ export type SymbolView = {
     reason: string;
     hasPosition: boolean;
   } | null;
+  /** condicoes do lado vendido (so futuros com vendido ligado) */
+  radarShort?: { dcLow: number | null; breakdown: boolean; belowEma: boolean; regimeOk: boolean; action: string; reason: string } | null;
   error?: string;
 };
 
@@ -39,6 +41,10 @@ export type PositionView = {
   stop_price: number;
   entry_candle_time: number;
   origin: "strategy" | "manual";
+  side: "long" | "short";
+  market: "spot" | "futures";
+  leverage: number;
+  liquidation_price: number | null;
   target_price: number | null;
   trailing: boolean;
   opened_at: string;
@@ -92,6 +98,9 @@ export type DashboardState = {
     max_drawdown_pct: number;
     max_position_usdt: number;
     capital_usdt: number | null;
+    market: "spot" | "futures";
+    leverage: number;
+    short_enabled: boolean;
     capital_set_at: string | null;
     peak_equity: number | null;
     killed_at: string | null;
@@ -115,5 +124,5 @@ export type DashboardState = {
   signals: SignalView[];
   equity: EquityView[];
   logs: LogView[];
-  env: { binanceKeys: boolean; telegram: boolean; baseUrl: string };
+  env: { binanceKeys: boolean; telegram: boolean; baseUrl: string; futuresBaseUrl: string };
 };

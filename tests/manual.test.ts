@@ -130,6 +130,15 @@ describe("simulacao historica de entrada", () => {
     const r = simulateEntry({ candles: cs, stopPct: 5, targetPct: 5, horizonBars: 1, feePct: 0 });
     expect(r.pStop).toBe(100);
   });
+  it("vendido espelha o comprado: queda bate o alvo, alta bate o stop", () => {
+    const down = up.map((_, i) => { const p = 100 * 0.99 ** i; return c(i, p, p * 1.001, p * 0.999, p); });
+    const r = simulateEntry({ candles: down, stopPct: 2, targetPct: 3, horizonBars: 10, feePct: 0, side: "short" });
+    expect(r.pTarget).toBe(100);
+    expect(r.p50).toBeCloseTo(3, 6);
+    const r2 = simulateEntry({ candles: up, stopPct: 2, targetPct: 3, horizonBars: 10, feePct: 0, side: "short" });
+    expect(r2.pStop).toBe(100);
+    expect(r2.worst).toBeLessThanOrEqual(-2);
+  });
   it("taxas reduzem o resultado", () => {
     const r = simulateEntry({ candles: up, stopPct: 2, targetPct: 3, horizonBars: 10, feePct: 0.1 });
     expect(r.p50).toBeCloseTo(2.8, 6);

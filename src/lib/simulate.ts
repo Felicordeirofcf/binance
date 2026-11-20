@@ -15,6 +15,8 @@ export type SimInput = {
   targetPct: number | null;
   horizonBars: number;
   feePct?: number; // por lado, default 0,1%
+  /** vendido: stop acima, alvo abaixo, ganha quando cai */
+  side?: "long" | "short";
 };
 
 export type SimResult = {
@@ -41,7 +43,8 @@ const quantile = (sorted: number[], q: number) => {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
 };
 
-export function simulateEntry({ candles, stopPct, targetPct, horizonBars, feePct = 0.1 }: SimInput): SimResult {
+export function simulateEntry({ candles, stopPct, targetPct, horizonBars, feePct = 0.1, side = "long" }: SimInput): SimResult {
+  if (side === "short") return simulateShort({ candles, stopPct, targetPct, horizonBars, feePct });
   const out: number[] = [];
   const bars: number[] = [];
   let hitT = 0;
@@ -69,6 +72,59 @@ export function simulateEntry({ candles, stopPct, targetPct, horizonBars, feePct
     }
     if (ret === null) {
       ret = candles[s + horizonBars].close / entry - 1;
+      open++;
+      j = s + horizonBars;
+    }
+    out.push((ret - (2 * feePct) / 100) * 100);
+    bars.push(j - s);
+  }
+  const n = out.length;
+  const sorted = [...out].sort((a, b) => a - b);
+  const bsorted = [...bars].sort((a, b) => a - b);
+  const pc = (k: number) => (n ? (k / n) * 100 : 0);
+  return {
+    samples: n,
+    horizonBars,
+    pTarget: pc(hitT),
+    pStop: pc(hitS),
+    pOpen: pc(open),
+    p10: quantile(sorted, 0.1),
+    p50: quantile(sorted, 0.5),
+    p90: quantile(sorted, 0.9),
+    mean: n ? out.reduce((a, b) => a + b, 0) / n : 0,
+    best: n ? sorted[n - 1] : 0,
+    worst: n ? sorted[0] : 0,
+    medianBarsToExit: quantile(bsorted, 0.5),
+  };
+}
+
+function simulateShort({ candles, stopPct, targetPct, horizonBars, feePct = 0.1 }: SimInput): SimResult {
+  const out: number[] = [];
+  const bars: number[] = [];
+  let hitT = 0;
+  let hitS = 0;
+  let open = 0;
+  for (let s = 0; s + horizonBars < candles.length; s++) {
+    const entry = candles[s].close;
+    const stop = entry * (1 + stopPct / 100);
+    const target = targetPct ? entry * (1 - targetPct / 100) : -Infinity;
+    let ret: number | null = null;
+    let j = s + 1;
+    for (; j <= s + horizonBars; j++) {
+      const c = candles[j];
+      if (c.high >= stop) {
+        ret = 1 - Math.max(c.open, stop) / entry; // gap acima do stop: pior
+        hitS++;
+        break;
+      }
+      if (c.low <= target) {
+        ret = 1 - target / entry;
+        hitT++;
+        break;
+      }
+    }
+    if (ret === null) {
+      ret = 1 - candles[s + horizonBars].close / entry;
       open++;
       j = s + horizonBars;
     }

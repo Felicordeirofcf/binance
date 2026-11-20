@@ -2,7 +2,7 @@ import "server-only";
 import { getKlinesForDisplay } from "./binance";
 import type { DashboardState, LinePoint, PositionView, SymbolView } from "./dashboard-types";
 import { atr, donchianHigh, donchianLow, efficiencyRatio, ema } from "./indicators";
-import { evaluate } from "./strategy";
+import { evaluate, evaluateShort } from "./strategy";
 import { db } from "./supabase";
 import type { BotConfig, Candle } from "./types";
 
@@ -49,8 +49,15 @@ async function symbolView(cfg: BotConfig, symbol: string, hasPosition: boolean):
         hasPosition,
       };
     }
+    let radarShort: SymbolView["radarShort"] = null;
+    if (cfg.market === "futures" && cfg.short_enabled && closed.length > cfg.ema_trend + 5) {
+      const s = evaluateShort(closed, cfg, hasPosition);
+      const c = closed[closed.length - 1].close;
+      radarShort = { dcLow: Number.isFinite(s.dcLow) ? s.dcLow : null, breakdown: c < s.dcLow, belowEma: c < s.emaTrend, regimeOk: s.regimeOk, action: s.action, reason: s.reason };
+    }
     return {
       symbol,
+      radarShort,
       price: all.length ? all[all.length - 1].close : null,
       candles: all.slice(from).map((c) => ({
         time: sec(c.openTime),
@@ -95,6 +102,9 @@ export async function buildDashboard(): Promise<DashboardState> {
     max_position_usdt: Number(c.max_position_usdt),
     peak_equity: n(c.peak_equity),
     capital_usdt: n(c.capital_usdt),
+    market: (c.market === "futures" ? "futures" : "spot") as "spot" | "futures",
+    leverage: Number(c.leverage ?? 1),
+    short_enabled: c.short_enabled === true,
     capital_set_at: (c.capital_set_at as string) ?? null,
   };
 
@@ -108,6 +118,10 @@ export async function buildDashboard(): Promise<DashboardState> {
     stop_price: Number(p.stop_price),
     entry_candle_time: Number(p.entry_candle_time),
     origin: p.origin === "manual" ? "manual" : "strategy",
+    side: p.side === "short" ? "short" : "long",
+    market: p.market === "futures" ? "futures" : "spot",
+    leverage: Number(p.leverage ?? 1),
+    liquidation_price: n(p.liquidation_price),
     target_price: n(p.target_price),
     trailing: p.trailing_stop !== false,
     opened_at: String(p.opened_at),
@@ -147,6 +161,9 @@ export async function buildDashboard(): Promise<DashboardState> {
       max_drawdown_pct: cfg.max_drawdown_pct,
       max_position_usdt: cfg.max_position_usdt,
       capital_usdt: cfg.capital_usdt,
+      market: cfg.market,
+      leverage: cfg.leverage,
+      short_enabled: cfg.short_enabled,
       capital_set_at: cfg.capital_set_at,
       peak_equity: cfg.peak_equity,
       killed_at: cfg.killed_at,
@@ -187,6 +204,7 @@ export async function buildDashboard(): Promise<DashboardState> {
       binanceKeys: Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_API_SECRET),
       telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),
       baseUrl: process.env.BINANCE_BASE_URL || "https://api.binance.com",
+      futuresBaseUrl: process.env.BINANCE_FUTURES_BASE_URL || "https://fapi.binance.com",
     },
   };
 }

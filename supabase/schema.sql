@@ -44,6 +44,17 @@ alter table bot_config add column if not exists capital_set_at timestamptz;
 alter table bot_config drop constraint if exists capital_sane;
 alter table bot_config add constraint capital_sane check (capital_usdt is null or capital_usdt >= 10);
 
+-- mercado: spot (so comprado) ou futures (USDT-M, comprado/vendido)
+alter table bot_config add column if not exists market text not null default 'spot';
+alter table bot_config drop constraint if exists market_sane;
+alter table bot_config add constraint market_sane check (market in ('spot','futures'));
+alter table bot_config add column if not exists leverage numeric not null default 1;
+alter table bot_config drop constraint if exists leverage_sane;
+alter table bot_config add constraint leverage_sane check (leverage >= 1 and leverage <= 10);
+-- bot vendido: reprovou no walk-forward (backtest/RESULTADOS.md). Default desligado.
+alter table bot_config add column if not exists short_enabled boolean not null default false;
+alter table bot_config add column if not exists paper_futures_state jsonb;
+
 -- ---------------------------------------------------------------
 -- 2. Posicoes
 -- ---------------------------------------------------------------
@@ -71,6 +82,13 @@ alter table positions drop constraint if exists positions_origin_check;
 alter table positions add constraint positions_origin_check check (origin in ('strategy','manual'));
 alter table positions add column if not exists target_price numeric;  -- alvo (so manual)
 alter table positions add column if not exists trailing_stop boolean not null default true; -- stop movel
+
+alter table positions add column if not exists side text not null default 'long';
+alter table positions drop constraint if exists positions_side_check;
+alter table positions add constraint positions_side_check check (side in ('long','short'));
+alter table positions add column if not exists market text not null default 'spot';
+alter table positions add column if not exists leverage numeric not null default 1;
+alter table positions add column if not exists liquidation_price numeric;
 
 -- uma posicao aberta por simbolo, garantido pelo banco
 create unique index if not exists one_open_position_per_symbol

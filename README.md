@@ -1,8 +1,11 @@
 # TrendBot
 
-Bot de tendência **long-only** para **Binance Spot**, em candles de 4h, com painel web.
-Sem alavancagem, sem futuros. Next.js 15 na Vercel, estado e auditoria no Supabase,
-backtest em Python.
+Bot de tendência para **Binance Spot** (só comprado) ou **Futuros USDT-M**
+(comprado e vendido, margem isolada, alavancagem até 10x), em candles de 4h, com
+painel web. Next.js 15 na Vercel, estado e auditoria no Supabase, backtest em Python.
+
+O default é o que foi validado no backtest: **Spot, comprado, 1x, risco de 1% por
+trade**. Futuros, alavancagem e bot vendido só ligam por escolha explícita no painel.
 
 > Este software envia ordens com dinheiro real quando `dry_run = false`.
 > Backtest não é promessa de resultado. Siga o roteiro da seção 6 sem pular etapas.
@@ -65,7 +68,7 @@ lock global ──► dados (só candles fechados) ──► RECONCILIA com a Bi
 | # | Invariante | Implementação |
 |---|---|---|
 | 1 | `dry_run = true` é o default | `schema.sql` (default), `engine.ts` (só é real se o banco disser **exatamente** `false`). O painel **não consegue** ligar o modo real, só voltar para o dry-run. |
-| 2 | Stop no servidor da Binance | `STOP_LOSS_LIMIT` GTC logo após a compra. Se o stop é rejeitado, a posição é vendida na hora. Toda execução confere se o stop existe e recoloca se sumiu. |
+| 2 | Stop no servidor da Binance | Spot: `STOP_LOSS_LIMIT` GTC. Futuros: `STOP_MARKET` com `closePosition=true` via `POST /fapi/v1/algoOrder` (o endpoint comum não aceita mais stops), gatilho no preço de marcação. Colocado logo após a entrada. Se o stop é rejeitado, a posição é vendida na hora. Toda execução confere se o stop existe e recoloca se sumiu. |
 | 3 | `clientOrderId` determinístico | `risk.ts::clientOrderId` → `tb_{tipo}_{symbol}_{candleOpenTime}`, mais `UNIQUE` em `orders.client_order_id`. Nunca trunca: falha se passar de 36 caracteres. |
 | 4 | Reconciliação antes de decidir | `engine.ts::reconcile`: stop executado fecha a posição local; compra feita sem gravação (crash) vira posição com stop; saldo vendido fora do bot encerra a posição; preço abaixo do stop sem execução (gap) dispara saída de emergência. |
 | 5 | Descartar o candle aberto | `binance.ts::getClosedCandles` / `dropOpenCandle` |
@@ -83,6 +86,38 @@ Proteções adicionais:
 - Painel e controles atrás de HTTP Basic Auth, com checagem de origem (CSRF).
 
 ---
+
+### Futuros USDT-M (opcional)
+
+Ligue em **Mercado e alavancagem** no painel. Exige não ter posição aberta.
+
+- **Margem isolada e modo One-way:** o bot configura a margem isolada sozinho. Ele
+  **recusa** contas em modo Hedge; mude para "posição única" nas configurações de
+  Futuros da Binance.
+- **Alavancagem de 1x a 10x**, no bot e no manual. A entrada é recusada se o stop
+  ficar a mais de 80% da distância até a liquidação.
+- **Chave:** precisa de "Enable Futures", além de leitura e trading, e nunca de saque.
+  `BINANCE_FUTURES_API_KEY` e `BINANCE_FUTURES_API_SECRET` são opcionais; sem elas,
+  usa as chaves de Spot.
+- **Testnet:** `BINANCE_FUTURES_BASE_URL=https://testnet.binancefuture.com`, com
+  chaves do testnet de futuros.
+- **Funding** a cada 8h não é simulado no papel. No real ele custa ou paga cerca de
+  0,01% por período.
+
+Com o sizing por risco, **a alavancagem sozinha não muda ganho nem perda**: a perda
+no stop continua sendo 1% do capital, e a alavancagem só reduz a margem presa. O que
+aumenta ganho e perda é o risco por trade. Backtest BTC 2017–2026, dentro da amostra,
+sem liquidação nem funding:
+
+| Risco/trade | 1x | 3x | 5x |
+|---|---|---|---|
+| 1% | 11,3% a.a., DD −11,8% | igual | igual |
+| 2% | 16,4% a.a., DD −23,6% | 22,1% a.a., DD −22,8% | igual ao 3x |
+| 5% | 16,8% a.a., DD −34,6% | 42,4% a.a., DD −50,0% | 51,0% a.a., DD −50,3% |
+
+A partir de 2% de risco, o drawdown passa do kill switch de 20%. **O bot vendido**
+(`short_enabled`) reprovou no walk-forward, com profit factor 0,78 no BTC: ligue
+sabendo que essa regra perdeu dinheiro fora da amostra.
 
 ## 4. Deploy: Supabase → GitHub → Vercel
 
@@ -197,3 +232,5 @@ ajusta parâmetro. Nenhum código do bot lê a saída dela.
 - **Execução:** o backtest executa no open do candle seguinte; o bot executa ~2 minutos
   depois. O dry-run preenche pelo último close com 0,05% de slippage.
 - **Escopo:** só pares `*USDT`, uma posição por símbolo.
+- **Futuros:** o preço de liquidação no papel é uma estimativa (manutenção de 0,5%).
+  No real, o bot usa o valor que a Binance informa em `positionRisk`.

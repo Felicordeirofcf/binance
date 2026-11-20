@@ -38,6 +38,8 @@ export default function Radar({ view, position, capital }: { view: SymbolView; p
   const toBreak = r.dcHigh ? (r.close / r.dcHigh - 1) * 100 : 0;
   const toEma = (r.close / r.ema - 1) * 100;
   const manual = position?.origin === "manual";
+  const short = position?.side === "short";
+  const sg = short ? -1 : 1;
   const verdict = manual
     ? { tone: "warn" as const, text: "POSIÇÃO MANUAL" }
     : r.action === "buy"
@@ -72,16 +74,16 @@ export default function Radar({ view, position, capital }: { view: SymbolView; p
         </>
       ) : (
         <>
-          {!manual && <Row ok={!(r.dcLow && r.close < r.dcLow)} label="Acima da mínima de saída" detail={`${pct(r.dcLow ? (r.close / r.dcLow - 1) * 100 : null)} vs ${price(r.dcLow)}`}>
+          {!manual && !short && <Row ok={!(r.dcLow && r.close < r.dcLow)} label="Acima da mínima de saída" detail={`${pct(r.dcLow ? (r.close / r.dcLow - 1) * 100 : null)} vs ${price(r.dcLow)}`}>
             <Gap value={r.dcLow ? (r.close / r.dcLow - 1) * 100 : 0} />
           </Row>}
           {position && (
-            <Row ok={r.close > position.stop_price} label="Distância até o stop" detail={`${pct((r.close / position.stop_price - 1) * 100)} · ${price(position.stop_price)}`}>
-              <Gap value={(r.close / position.stop_price - 1) * 100} span={10} />
+            <Row ok={sg * (r.close - position.stop_price) > 0} label="Distância até o stop" detail={`${pct(sg * (r.close / position.stop_price - 1) * 100)} · ${price(position.stop_price)}`}>
+              <Gap value={sg * (r.close / position.stop_price - 1) * 100} span={10} />
             </Row>
           )}
           {position && (() => {
-            const atStop = (position.stop_price - position.entry_price) * position.qty;
+            const atStop = sg * (position.stop_price - position.entry_price) * position.qty;
             const ofCap = capital ? (atStop / capital) * 100 : null;
             return (
               <Row
@@ -93,12 +95,30 @@ export default function Radar({ view, position, capital }: { view: SymbolView; p
           })()}
           {position && (
             <Row
-              ok={r.close >= position.entry_price}
+              ok={sg * (r.close - position.entry_price) >= 0}
               label="Resultado não realizado"
-              detail={`${pct((r.close / position.entry_price - 1) * 100)} · ${((r.close - position.entry_price) * position.qty).toFixed(2)} USDT`}
+              detail={`${pct(sg * (r.close / position.entry_price - 1) * 100)} · ${(sg * (r.close - position.entry_price) * position.qty).toFixed(2)} USDT`}
             />
           )}
         </>
+      )}
+      {!r.hasPosition && view.radarShort && (
+        <div className="space-y-2 rounded-xl bg-rose-500/[0.04] p-3 ring-1 ring-rose-500/15">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium text-rose-200">Lado vendido</span>
+            <Badge tone={view.radarShort.action === "short" ? "down" : "slate"} pulse={view.radarShort.action === "short"}>{view.radarShort.action === "short" ? "SINAL DE VENDA" : "aguardando"}</Badge>
+          </div>
+          {[
+            [view.radarShort.breakdown, `Rompeu a mínima (${price(view.radarShort.dcLow)})`],
+            [view.radarShort.belowEma, "Abaixo da EMA de tendência"],
+            [view.radarShort.regimeOk, "Regime de tendência (ER)"],
+          ].map(([ok, l]) => (
+            <div key={String(l)} className="flex items-center gap-2 text-xs text-slate-300">
+              <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${ok ? "bg-rose-400/20 text-rose-200" : "bg-white/5 text-slate-500"}`}>{ok ? "✓" : "·"}</span>
+              {l}
+            </div>
+          ))}
+        </div>
       )}
       <div className="num flex justify-between pt-1 text-[11px] text-slate-500">
         <span>candle {new Date(r.candleTime).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>

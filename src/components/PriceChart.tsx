@@ -70,17 +70,33 @@ export default function PriceChart({ view, positions, interval }: { view: Symbol
       const markers: SeriesMarker<Time>[] = [];
       for (const p of mine) {
         const entryT = Math.floor(p.entry_candle_time / 1000) + ivSec; // executa no candle seguinte
-        if (entryT >= first) markers.push({ time: entryT as UTCTimestamp, position: "belowBar", color: "#22d3a0", shape: "arrowUp", text: `C ${fmtPrice(p.entry_price)}` });
+        const short = p.side === "short";
+        if (entryT >= first)
+          markers.push(
+            short
+              ? { time: entryT as UTCTimestamp, position: "aboveBar", color: "#f43f5e", shape: "arrowDown", text: `V ${fmtPrice(p.entry_price)}${p.market === "futures" ? ` ${p.leverage}x` : ""}` }
+              : { time: entryT as UTCTimestamp, position: "belowBar", color: "#22d3a0", shape: "arrowUp", text: `C ${fmtPrice(p.entry_price)}${p.market === "futures" ? ` ${p.leverage}x` : ""}` },
+          );
         if (p.closed_at) {
           const t = Math.floor(Date.parse(p.closed_at) / 1000);
           const snap = t - (t % ivSec);
-          if (snap >= first) markers.push({ time: snap as UTCTimestamp, position: "aboveBar", color: (p.pnl_usdt ?? 0) >= 0 ? "#60a5fa" : "#f43f5e", shape: "arrowDown", text: `V ${(p.pnl_usdt ?? 0) >= 0 ? "+" : ""}${(p.pnl_usdt ?? 0).toFixed(2)}` });
+          if (snap >= first)
+            markers.push({
+              time: snap as UTCTimestamp,
+              position: short ? "belowBar" : "aboveBar",
+              color: (p.pnl_usdt ?? 0) >= 0 ? "#60a5fa" : "#f43f5e",
+              shape: short ? "arrowUp" : "arrowDown",
+              text: `${short ? "Z" : "S"} ${(p.pnl_usdt ?? 0) >= 0 ? "+" : ""}${(p.pnl_usdt ?? 0).toFixed(2)}`,
+            });
         }
       }
       markers.sort((a, b) => Number(a.time) - Number(b.time));
       createSeriesMarkers(candles, markers);
     }
     const open = mine.find((p) => p.status === "open");
+    if (open?.liquidation_price) {
+      candles.createPriceLine({ price: open.liquidation_price, color: "#fb923c", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "LIQUIDAÇÃO" });
+    }
     if (open) {
       candles.createPriceLine({ price: open.stop_price, color: "#f43f5e", lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: "STOP" });
       candles.createPriceLine({ price: open.entry_price, color: "#22d3a0", lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: "ENTRADA" });

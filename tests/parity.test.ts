@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { atr, donchianHigh, donchianLow, efficiencyRatio, ema } from "@/lib/indicators";
-import { evaluate } from "@/lib/strategy";
+import { evaluate, evaluateShort } from "@/lib/strategy";
 import { DEFAULT_CONFIG } from "@/lib/store";
 import { loadCsv } from "./helpers";
 
@@ -26,6 +26,8 @@ type Row = {
   er: number;
   action_flat: string;
   action_held: string;
+  short_flat: string;
+  short_held: string;
 };
 
 function pythonOutput(): { warmup: number; rows: Row[] } {
@@ -78,5 +80,23 @@ describe("paridade Python <-> TypeScript", () => {
     // a amostra precisa exercitar os dois lados, senao o teste nao prova nada
     expect(buys).toBeGreaterThan(5);
     expect(sells).toBeGreaterThan(5);
+  });
+
+  it("lado vendido: mesmo sinal Python <-> TS para todo candle", () => {
+    const mismatches: string[] = [];
+    let shorts = 0;
+    let covers = 0;
+    for (const r of py.rows) {
+      const prefix = candles.slice(0, r.i + 1);
+      const flat = evaluateShort(prefix, cfg, false).action;
+      const held = evaluateShort(prefix, cfg, true).action;
+      if (flat !== r.short_flat) mismatches.push(`i=${r.i} flat ts=${flat} py=${r.short_flat}`);
+      if (held !== r.short_held) mismatches.push(`i=${r.i} held ts=${held} py=${r.short_held}`);
+      if (flat === "short") shorts++;
+      if (held === "cover") covers++;
+    }
+    expect(mismatches).toEqual([]);
+    expect(shorts).toBeGreaterThan(5);
+    expect(covers).toBeGreaterThan(5);
   });
 });

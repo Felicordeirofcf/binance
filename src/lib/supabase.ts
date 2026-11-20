@@ -39,6 +39,9 @@ function toConfig(r: Record<string, unknown>): BotConfig {
     stop_limit_buffer_pct: Number(r.stop_limit_buffer_pct),
     peak_equity: num(r.peak_equity),
     capital_usdt: num(r.capital_usdt),
+    market: r.market === "futures" ? "futures" : "spot",
+    leverage: Number(r.leverage ?? 1),
+    short_enabled: r.short_enabled === true,
   };
 }
 
@@ -52,6 +55,10 @@ function toPosition(r: Record<string, unknown>): Position {
     origin: r.origin === "manual" ? "manual" : "strategy",
     target_price: num(r.target_price),
     trailing_stop: r.trailing_stop !== false,
+    side: r.side === "short" ? "short" : "long",
+    market: r.market === "futures" ? "futures" : "spot",
+    leverage: Number(r.leverage ?? 1),
+    liquidation_price: num(r.liquidation_price),
   };
 }
 
@@ -108,7 +115,7 @@ export class SupabaseStore implements Store {
       .from("orders")
       .select("*")
       .eq("symbol", symbol)
-      .in("kind", ["buy", "mbuy"])
+      .in("kind", ["buy", "mbuy", "short", "mshort"])
       .is("position_id", null)
       .not("status", "in", "(error,not_sent,CANCELED,REJECTED,EXPIRED)")
       .order("created_at", { ascending: false })

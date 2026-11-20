@@ -28,6 +28,13 @@ export type BotConfig = {
   capital_usdt: number | null;
   /** Quando o capital alocado foi definido: o PnL do bot conta a partir daqui. */
   capital_set_at: string | null;
+  /** onde opera: spot (so comprado) ou futures (USDT-M, comprado/vendido) */
+  market: "spot" | "futures";
+  /** alavancagem do bot em futuros (1 a 10) */
+  leverage: number;
+  /** bot pode abrir vendido (so futuros). Reprovou no walk-forward. */
+  short_enabled: boolean;
+  paper_futures_state: unknown;
   stop_limit_buffer_pct: number;
   peak_equity: number | null;
   killed_at: string | null;
@@ -48,6 +55,10 @@ export type Position = {
   entry_candle_time: number;
   /** strategy = aberta pela regra; manual = aberta por voce no painel */
   origin: "strategy" | "manual";
+  side: "long" | "short";
+  market: "spot" | "futures";
+  leverage: number;
+  liquidation_price: number | null;
   /** alvo de lucro (so manual); verificado no fechamento de cada candle */
   target_price: number | null;
   /** stop movel (ATR) ligado? strategy sempre; manual opcional */
@@ -67,7 +78,8 @@ export type SymbolFilters = {
 };
 
 export type Signal = {
-  action: "buy" | "sell" | "hold";
+  /** buy/sell = comprado (entra/sai); short/cover = vendido (entra/sai) */
+  action: "buy" | "sell" | "short" | "cover" | "hold";
   reason: string;
   close: number;
   dcHigh: number;

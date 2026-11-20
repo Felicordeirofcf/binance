@@ -6,6 +6,7 @@ import EquityChart from "./EquityChart";
 import Radar from "./Radar";
 import { CapitalCard, ExpectationCard } from "./Capital";
 import ManualTrade from "./ManualTrade";
+import MarketCard from "./MarketCard";
 import { ago, dt, pct, price, reason, usd } from "./format";
 import { AnimatedNumber, Badge, Button, Card, Meter, Modal, Stat, Tabs, Toasts, type ToastMsg } from "./ui";
 
@@ -24,7 +25,6 @@ export default function Dashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [confirm, setConfirm] = useState<Confirm>(null);
-  const [typed, setTyped] = useState("");
   const [killReason, setKillReason] = useState("");
   const [left, setLeft] = useState(REFRESH_S);
   const [, force] = useState(0);
@@ -92,7 +92,6 @@ export default function Dashboard() {
     } finally {
       setBusy(null);
       setConfirm(null);
-      setTyped("");
     }
   }
 
@@ -128,10 +127,11 @@ export default function Dashboard() {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-emerald-400 text-lg font-black text-ink-950 shadow-lg shadow-emerald-500/20">T</div>
           <div>
             <h1 className="text-lg font-semibold tracking-tight text-white">TrendBot</h1>
-            <p className="text-xs text-slate-500">Tendência long-only · Binance Spot · {cfg.interval}</p>
+            <p className="text-xs text-slate-500">Tendência · Binance {cfg.market === "futures" ? "Futuros USDT-M" : "Spot"} · {cfg.interval}</p>
           </div>
           <div className="ml-2 flex flex-wrap gap-1.5">
             {cfg.dry_run ? <Badge tone="warn">DRY-RUN · papel</Badge> : <Badge tone="down" pulse>MODO REAL</Badge>}
+            <Badge tone="accent">{cfg.market === "futures" ? `FUTUROS ${cfg.leverage}x${cfg.short_enabled ? " · ▲▼" : " · ▲"}` : "SPOT"}</Badge>
             {killed ? <Badge tone="down">KILL SWITCH</Badge> : cfg.enabled ? <Badge tone="up" pulse>Ligado</Badge> : <Badge>Desligado</Badge>}
           </div>
         </div>
@@ -268,9 +268,14 @@ export default function Dashboard() {
         <Card className="lg:col-span-2" title="Curva de capital" delay={360} right={<Tabs value={eqMode} onChange={setEqMode} items={[{ id: "equity", label: "Equity" }, { id: "drawdown", label: "Drawdown" }]} />}>
           <EquityChart data={state.equity} mode={eqMode} killAt={cfg.max_drawdown_pct} />
         </Card>
+        <div className="space-y-4">
+        <Card title="Mercado e alavancagem" delay={370}>
+          <MarketCard state={state} busy={busy !== null} control={control} />
+        </Card>
         <Card title="Capital alocado" delay={380}>
           <CapitalCard state={state} busy={busy !== null} onSave={(capital) => control("set_capital", { capital })} />
         </Card>
+        </div>
       </div>
 
       {/* ---------- expectativa + parametros ---------- */}
@@ -340,14 +345,12 @@ export default function Dashboard() {
         {confirm?.action === "kill" && (
           <input value={killReason} onChange={(e) => setKillReason(e.target.value)} placeholder="motivo (opcional)" className="mt-4 w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none focus:ring-sky-400/50" />
         )}
-        <p className="mt-4 text-xs text-slate-500">Digite <b className="num text-slate-200">{confirm?.word}</b> para confirmar:</p>
-        <input autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} className="num mt-1 w-full rounded-xl bg-white/5 px-3 py-2 text-sm ring-1 ring-white/10 outline-none focus:ring-sky-400/50" />
         <div className="mt-5 flex justify-end gap-2">
           <Button onClick={() => setConfirm(null)}>Cancelar</Button>
           <Button
             tone={confirm?.action === "kill" ? "down" : "warn"}
-            disabled={typed !== confirm?.word || busy !== null}
-            onClick={() => confirm && control(confirm.action, { confirm: typed, reason: killReason || undefined })}
+            disabled={busy !== null}
+            onClick={() => confirm && control(confirm.action, { confirm: confirm.word, reason: killReason || undefined })}
           >
             {busy ? <Spinner /> : null} Confirmar
           </Button>
@@ -368,6 +371,7 @@ const LABEL: Record<string, string> = {
   reset_paper: "Reset da carteira",
   test_telegram: "Teste do Telegram",
   set_capital: "Capital alocado",
+  set_market: "Mercado",
   manual_buy: "Compra manual",
   close_position: "Posição encerrada",
 };
@@ -393,11 +397,12 @@ function PositionsTable({ state }: { state: DashboardState }) {
         <tbody className="divide-y divide-white/5">
           {state.positions.map((p) => {
             const px = p.status === "open" ? prices[p.symbol] : p.exit_price;
-            const r = px ? (px / p.entry_price - 1) * 100 : null;
-            const pnl = p.status === "open" ? (px ? (px - p.entry_price) * p.qty : null) : p.pnl_usdt;
+            const sg = p.side === "short" ? -1 : 1;
+            const r = px ? sg * (px / p.entry_price - 1) * 100 : null;
+            const pnl = p.status === "open" ? (px ? sg * (px - p.entry_price) * p.qty : null) : p.pnl_usdt;
             return (
               <tr key={p.id} className="transition hover:bg-white/[0.03]">
-                <td className={td}><span className="font-semibold text-slate-100">{p.symbol}</span> {p.origin === "manual" && <span className="ml-1 text-[10px] text-sky-300/90">manual</span>} {p.dry_run && <span className="ml-1 text-[10px] text-amber-300/80">papel</span>}</td>
+                <td className={td}><span className="font-semibold text-slate-100">{p.symbol}</span> <span className={`ml-1 text-[10px] ${p.side === "short" ? "text-rose-300" : "text-emerald-300"}`}>{p.side === "short" ? "▼ vendido" : "▲ comprado"}{p.market === "futures" ? ` ${p.leverage}x` : ""}</span> {p.origin === "manual" && <span className="ml-1 text-[10px] text-sky-300/90">manual</span>} {p.dry_run && <span className="ml-1 text-[10px] text-amber-300/80">papel</span>}</td>
                 <td className={td}>{p.status === "open" ? <Badge tone="accent" pulse>aberta</Badge> : <Badge>fechada</Badge>}</td>
                 <td className={td}>{p.qty}</td>
                 <td className={td}>{price(p.entry_price)}</td>

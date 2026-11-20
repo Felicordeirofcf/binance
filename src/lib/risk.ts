@@ -18,10 +18,12 @@ export function sizePosition(
   atrValue: number,
   cfg: Pick<BotConfig, "atr_mult" | "risk_pct" | "max_position_usdt">,
   filters: SymbolFilters,
+  side: "long" | "short" = "long",
 ): SizingResult {
   if (!(equity > 0) || !(price > 0)) return { ok: false, reason: "equity_ou_preco_invalido" };
-  const stop = price - cfg.atr_mult * atrValue;
-  const riskPerUnit = price - stop;
+  // freeUsdt = poder de compra: saldo livre (spot) ou margem livre x alavancagem (futuros)
+  const stop = side === "long" ? price - cfg.atr_mult * atrValue : price + cfg.atr_mult * atrValue;
+  const riskPerUnit = Math.abs(price - stop);
   if (!(riskPerUnit > 0) || !(stop > 0)) return { ok: false, reason: "atr_invalido" };
 
   let qty = (equity * cfg.risk_pct) / riskPerUnit;
@@ -67,8 +69,9 @@ export function checkKillSwitch(
   return { killed: false, drawdownPct, peak };
 }
 
-export type OrderKind = "buy" | "sell" | "stop" | "rstop" | "kill" | "emsell" | "mbuy" | "msell";
-const KINDS: readonly OrderKind[] = ["buy", "sell", "stop", "rstop", "kill", "emsell", "mbuy", "msell"];
+/** entradas: buy/mbuy (comprado), short/mshort (vendido); saidas: sell, cover, msell, kill, emsell; stops: stop, rstop */
+export type OrderKind = "buy" | "sell" | "stop" | "rstop" | "kill" | "emsell" | "mbuy" | "msell" | "short" | "cover" | "mshort";
+const KINDS: readonly OrderKind[] = ["buy", "sell", "stop", "rstop", "kill", "emsell", "mbuy", "msell", "short", "cover", "mshort"];
 
 /**
  * clientOrderId deterministico: tb_{tipo}_{symbol}_{candleOpenTime}.

@@ -20,15 +20,16 @@ export async function GET(req: Request) {
   const targetRaw = u.searchParams.get("targetPct");
   const targetPct = targetRaw ? Number(targetRaw) : null;
   const days = Math.min(90, Math.max(1, Number(u.searchParams.get("days") || 30)));
+  const side = u.searchParams.get("side") === "short" ? "short" : "long";
   try {
     const cfg = await new SupabaseStore().getConfig();
     if (!cfg.symbols.includes(symbol)) return NextResponse.json({ error: "symbol fora de bot_config.symbols" }, { status: 400 });
     if (!(stopPct >= 0.3 && stopPct <= 50)) return NextResponse.json({ error: "stop entre 0,3% e 50%" }, { status: 400 });
-    if (targetPct !== null && !(targetPct >= 0.3 && targetPct <= 1000)) return NextResponse.json({ error: "alvo entre 0,3% e 1000%" }, { status: 400 });
+    if (targetPct !== null && !(targetPct >= 0.3 && targetPct <= (side === "short" ? 90 : 1000))) return NextResponse.json({ error: "alvo entre 0,3% e 1000%" }, { status: 400 });
 
     const [candles, price] = await Promise.all([getClosedHistory(symbol, cfg.interval, 3000), getPrice(symbol)]);
     const horizonBars = Math.round((days * 24) / (HOURS[cfg.interval] ?? 4));
-    const sim = simulateEntry({ candles, stopPct, targetPct, horizonBars });
+    const sim = simulateEntry({ candles, stopPct, targetPct, horizonBars, side, feePct: cfg.market === "futures" ? 0.05 : 0.1 });
     const a = atr(candles, cfg.atr_period);
     const atrPct = (a[a.length - 1] / candles[candles.length - 1].close) * 100;
     return NextResponse.json({
@@ -39,6 +40,7 @@ export async function GET(req: Request) {
       historyFrom: new Date(candles[0].openTime).toISOString(),
       historyTo: new Date(candles[candles.length - 1].closeTime).toISOString(),
       days,
+      side,
       sim,
     });
   } catch (e) {

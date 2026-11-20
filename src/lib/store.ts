@@ -86,6 +86,10 @@ export const DEFAULT_CONFIG: BotConfig = {
   max_position_usdt: 100,
   capital_usdt: null,
   capital_set_at: null,
+  market: "spot",
+  leverage: 1,
+  short_enabled: false,
+  paper_futures_state: null,
   stop_limit_buffer_pct: 0.005,
   peak_equity: null,
   killed_at: null,
@@ -151,7 +155,7 @@ export class MemoryStore implements Store {
   }
   async findUnlinkedEntries(symbol: string) {
     return this.orders.filter(
-      (o) => o.symbol === symbol && (o.kind === "buy" || o.kind === "mbuy") && !o.position_id && !["error", "not_sent", "CANCELED", "REJECTED", "EXPIRED"].includes(o.status),
+      (o) => o.symbol === symbol && ["buy", "mbuy", "short", "mshort"].includes(o.kind) && !o.position_id && !["error", "not_sent", "CANCELED", "REJECTED", "EXPIRED"].includes(o.status),
     );
   }
   async realizedPnlSince(since: string, dryRun: boolean) {

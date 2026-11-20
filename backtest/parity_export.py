@@ -22,6 +22,9 @@ def export(csv: str, params: dict | None = None) -> dict:
         r = d.iloc[i]
         flat, _ = evaluate_row(r, p, False)
         held, _ = evaluate_row(r, p, True)
+        ps = {**p, "side": "short"}
+        sflat, _ = evaluate_row(r, ps, False)
+        sheld, _ = evaluate_row(r, ps, True)
         f = lambda v: None if isinstance(v, float) and math.isnan(v) else float(v)
         rows.append({
             "i": i,
@@ -34,6 +37,8 @@ def export(csv: str, params: dict | None = None) -> dict:
             # nomes do TS: enter->buy, exit->sell
             "action_flat": {"enter": "buy", "exit": "sell"}.get(flat, flat),
             "action_held": {"enter": "buy", "exit": "sell"}.get(held, held),
+            "short_flat": {"enter": "short", "exit": "cover"}.get(sflat, sflat),
+            "short_held": {"enter": "short", "exit": "cover"}.get(sheld, sheld),
         })
     return {"params": p, "warmup": warmup_bars(p), "rows": rows}
 

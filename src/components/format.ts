@@ -41,6 +41,11 @@ export const REASONS: Record<string, string> = {
   stop_nao_executado: "Stop não executou (gap)",
   reconciliacao_saldo_ausente: "Saldo ausente na reconciliação",
   manual: "Encerrada por você",
+  reconciliacao_posicao_ausente: "Posição ausente na exchange (fechada fora ou liquidada)",
+  sem_rompimento_da_minima: "Sem rompimento da mínima",
+  acima_da_ema_de_tendencia: "Acima da EMA de tendência",
+  rompimento_de_baixa: "Rompimento de baixa",
+  stop_perto_da_liquidacao: "Stop perto da liquidação",
   alvo: "Alvo atingido",
 };
 export const reason = (r: string | null | undefined) => (r ? REASONS[r] ?? r.replaceAll("_", " ") : "—");
