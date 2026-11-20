@@ -80,7 +80,7 @@ function LivePosition({ p, last, capital, busy, onClose }: { p: PositionView; la
         <div className="rounded-xl bg-black/20 p-2"><div className="text-slate-500">se o stop executar</div><div className={atStop >= 0 ? "text-emerald-300" : "text-rose-300"}>{atStop >= 0 ? "+" : "−"}{usd(Math.abs(atStop))} ({pct(sg * (p.stop_price / p.entry_price - 1) * 100)})</div></div>
         <div className="rounded-xl bg-black/20 p-2"><div className="text-slate-500">no alvo</div><div className="text-emerald-300">{atTarget === null ? (p.origin === "manual" ? "sem alvo" : "saída pela regra") : `+${usd(atTarget)} (${pct(sg * (p.target_price! / p.entry_price - 1) * 100)})`}</div></div>
       </div>
-      <p className="mt-2 text-[11px] text-slate-500">Stop no servidor da Binance{p.trailing ? `, móvel (${p.side === "short" ? "desce" : "sobe"} com 2× ATR)` : ", fixo"}. O alvo é conferido no fechamento de cada candle.</p>
+      <p className="mt-2 text-[11px] text-slate-500">Stop no servidor da Binance{p.trailing ? `, móvel (${p.side === "short" ? "desce" : "sobe"} com 2× ATR)` : ", fixo"}. {p.market === "futures" ? "O alvo também fica no servidor: executa no instante em que o preço toca." : "O alvo é conferido no fechamento de cada candle."}</p>
     </div>
   );
 }

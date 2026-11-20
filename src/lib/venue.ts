@@ -36,6 +36,8 @@ export interface Venue {
   getOrder(symbol: string, cid: string): Promise<Fill | null>;
   marketOrder(symbol: string, side: OrderSideX, qty: string, cid: string, reduceOnly: boolean): Promise<Fill>;
   placeStop(symbol: string, posSide: Side, qty: string, stop: string, limit: string, cid: string): Promise<StopInfo>;
+  /** Alvo de lucro no servidor (so futuros). Consultado/cancelado com getStop/cancelStop. */
+  placeTakeProfit?(symbol: string, posSide: Side, target: string, cid: string): Promise<StopInfo>;
   getStop(symbol: string, cid: string): Promise<StopInfo | null>;
   /** null = nao havia stop aberto com esse id */
   cancelStop(symbol: string, cid: string): Promise<StopInfo | null>;
@@ -177,6 +179,10 @@ export class FuturesLiveVenue implements Venue {
     const a = await fut.placeStopMarket(symbol, posSide === "long" ? "SELL" : "BUY", stop, cid);
     return this.stop({ ...a, algoStatus: a.algoStatus ?? "NEW", clientAlgoId: a.clientAlgoId ?? cid, triggerPrice: a.triggerPrice ?? stop }, symbol);
   }
+  async placeTakeProfit(symbol: string, posSide: Side, target: string, cid: string) {
+    const a = await fut.placeTakeProfitMarket(symbol, posSide === "long" ? "SELL" : "BUY", target, cid);
+    return this.stop({ ...a, algoStatus: a.algoStatus ?? "NEW", clientAlgoId: a.clientAlgoId ?? cid, triggerPrice: a.triggerPrice ?? target }, symbol);
+  }
   async getStop(symbol: string, cid: string) {
     const a = await fut.getAlgoOrder(cid);
     return a ? this.stop(a, symbol) : null;
@@ -198,7 +204,7 @@ export type FuturesPaperState = {
   positions: Record<string, { qty: number; entry: number; lev: number } | undefined>; // qty > 0 comprado, < 0 vendido
   leverage: Record<string, number>;
   orders: { cid: string; orderId: string; symbol: string; side: OrderSideX; qty: number; price: number; status: string; time: number }[];
-  stops: { cid: string; symbol: string; side: OrderSideX; trigger: number; status: "NEW" | "FILLED" | "CANCELED"; time: number; fillPrice?: number; fillQty?: number }[];
+  stops: { cid: string; symbol: string; side: OrderSideX; trigger: number; status: "NEW" | "FILLED" | "CANCELED"; time: number; fillPrice?: number; fillQty?: number; kind?: "stop" | "tp" }[];
   nextId: number;
 };
 
@@ -246,15 +252,22 @@ export class FuturesPaperVenue implements Venue {
   sync(symbol: string, candles: Candle[], price?: number) {
     const lastC = candles[candles.length - 1];
     if (lastC) this.last[symbol] = lastC.close;
-    for (const st of this.s.stops) {
-      if (st.symbol !== symbol || st.status !== "NEW") continue;
-      const hit = candles.find((c) => c.closeTime > st.time && (st.side === "SELL" ? c.low <= st.trigger : c.high >= st.trigger));
-      if (!hit) continue;
-      const px = st.side === "SELL" ? Math.min(hit.open, st.trigger) : Math.max(hit.open, st.trigger);
-      const q = this.close(symbol, px, Infinity);
-      st.status = "FILLED";
-      st.fillPrice = px;
-      st.fillQty = q;
+    // candle a candle; no mesmo candle o stop tem prioridade sobre o alvo (pior caso)
+    const open = this.s.stops.filter((x) => x.symbol === symbol && x.status === "NEW");
+    for (const c of candles) {
+      for (const st of [...open.filter((x) => x.kind !== "tp"), ...open.filter((x) => x.kind === "tp")]) {
+        if (st.status !== "NEW" || c.closeTime <= st.time) continue;
+        const tp = st.kind === "tp";
+        // stop: SELL dispara na queda, BUY na alta; alvo: o contrario
+        const hit = tp ? (st.side === "SELL" ? c.high >= st.trigger : c.low <= st.trigger) : st.side === "SELL" ? c.low <= st.trigger : c.high >= st.trigger;
+        if (!hit) continue;
+        // stop: pior entre gatilho e abertura; alvo: o gatilho (ganho do gap nao conta)
+        const px = tp ? st.trigger : st.side === "SELL" ? Math.min(c.open, st.trigger) : Math.max(c.open, st.trigger);
+        const q = this.close(symbol, px, Infinity);
+        st.status = "FILLED";
+        st.fillPrice = px;
+        st.fillQty = q;
+      }
     }
     // liquidacao: so acontece se nao houver stop (o painel exige stop antes da liquidacao)
     const p = this.s.positions[symbol];
@@ -324,6 +337,16 @@ export class FuturesPaperVenue implements Venue {
     const ref = this.last[symbol];
     if (ref && (side === "SELL" ? trig >= ref : trig <= ref)) throw new Error("paper futuros: Order would immediately trigger.");
     const st = { cid, symbol, side, trigger: trig, status: "NEW" as const, time: this.now() };
+    this.s.stops.push(st);
+    return { cid, status: "NEW", stopPrice: trig, fillPrice: null, fillQty: null, raw: st };
+  }
+  async placeTakeProfit(symbol: string, posSide: Side, target: string, cid: string): Promise<StopInfo> {
+    if (this.s.stops.some((x) => x.cid === cid && x.status === "NEW")) throw new Error(`paper futuros: clientAlgoId duplicado: ${cid}`);
+    const side: OrderSideX = posSide === "long" ? "SELL" : "BUY";
+    const trig = Number(target);
+    const ref = this.last[symbol];
+    if (ref && (side === "SELL" ? trig <= ref : trig >= ref)) throw new Error("paper futuros: Order would immediately trigger.");
+    const st = { cid, symbol, side, trigger: trig, status: "NEW" as const, time: this.now(), kind: "tp" as const };
     this.s.stops.push(st);
     return { cid, status: "NEW", stopPrice: trig, fillPrice: null, fillQty: null, raw: st };
   }

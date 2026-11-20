@@ -480,6 +480,12 @@ function submitMarket(ctx: Ctx, req: SubmitReq, reduceOnly: boolean) {
 }
 
 async function closePosition(ctx: Ctx, pos: Position, exitPrice: number, reason: string, qtyClosed = pos.qty) {
+  // stop e alvo ficam juntos no servidor: o que nao executou precisa sair
+  for (const cid of [pos.stop_client_order_id, pos.tp_client_order_id]) {
+    if (!cid) continue;
+    const c = await ctx.venue.cancelStop(pos.symbol, cid).catch(() => null);
+    if (c) await ctx.store.updateOrder(cid, { status: "CANCELED" });
+  }
   const fee = ctx.venue.fee;
   const pnl = sgn(pos.side) * (exitPrice - pos.entry_price) * qtyClosed - (exitPrice + pos.entry_price) * qtyClosed * fee;
   await ctx.store.updatePosition(pos.id, {
@@ -532,6 +538,12 @@ async function reconcile(ctx: Ctx, symbol: string, acct: Account): Promise<Posit
   const last = lastCandle(ctx, symbol);
   const stopEx = pos.stop_client_order_id ? await venue.getStop(symbol, pos.stop_client_order_id) : null;
 
+  const tpEx = pos.tp_client_order_id ? await venue.getStop(symbol, pos.tp_client_order_id) : null;
+  if (tpEx?.status === "FILLED") {
+    await store.updateOrder(tpEx.cid, { status: "FILLED", raw: { response: tpEx.raw, note: "alvo executado na exchange" } });
+    await closePosition(ctx, pos, tpEx.fillPrice ?? tpEx.stopPrice, "alvo", tpEx.fillQty ?? pos.qty);
+    return null;
+  }
   if (stopEx?.status === "FILLED") {
     await store.updateOrder(stopEx.cid, { status: "FILLED", raw: { response: stopEx.raw, note: "stop executado na exchange" } });
     await closePosition(ctx, pos, stopEx.fillPrice ?? stopEx.stopPrice, "stop", stopEx.fillQty ?? pos.qty);
@@ -582,6 +594,9 @@ async function reconcile(ctx: Ctx, symbol: string, acct: Account): Promise<Posit
       return null;
     }
   }
+  if (ctx.futures && pos.target_price !== null && tpEx?.status !== "NEW") {
+    pos = await placeTp(ctx, symbol, pos, pos.tp_client_order_id ? "rtp" : "tp", hourKey(ctx.now()));
+  }
   return pos;
 }
 
@@ -627,6 +642,38 @@ async function placeStop(ctx: Ctx, symbol: string, pos: Position, stopPrice: num
   return { ...pos, stop_price: stop, stop_client_order_id: res.cid };
 }
 
+/**
+ * Alvo NO SERVIDOR (futuros): TAKE_PROFIT_MARKET. Executa no instante em que o
+ * preco toca o alvo. Se falhar, a posicao continua protegida pelo stop e o
+ * alvo e conferido no fechamento do candle (fallback).
+ */
+async function placeTp(ctx: Ctx, symbol: string, pos: Position, kind: "tp" | "rtp", key: number): Promise<Position> {
+  if (!ctx.futures || pos.target_price === null || !ctx.venue.placeTakeProfit) return pos;
+  const f = ctx.data[symbol].filters;
+  const target = roundStep(pos.target_price, f.tickSize);
+  const last = lastCandle(ctx, symbol).close;
+  // alvo ja passou: a saida acontece pela conferencia do candle
+  if (pos.side === "long" ? target <= last : target >= last) return pos;
+  try {
+    const res = await submit(
+      ctx,
+      { kind, symbol, key, side: pos.side === "long" ? "SELL" : "BUY", type: "STOP_MARKET", qty: pos.qty, stopPrice: target, positionId: pos.id },
+      (cid) => ctx.venue.getStop(symbol, cid),
+      (cid) => ctx.venue.placeTakeProfit!(symbol, pos.side, fmt(target, f.tickSize), cid),
+      (o) => o.cid,
+    );
+    if (res.order.status !== "NEW") {
+      if (res.reused && kind === "tp") return placeTp(ctx, symbol, pos, "rtp", hourKey(ctx.now()));
+      return pos;
+    }
+    await ctx.store.updatePosition(pos.id, { tp_client_order_id: res.cid });
+    return { ...pos, tp_client_order_id: res.cid };
+  } catch (e) {
+    await ctx.store.log("warn", `${symbol}: alvo no servidor nao colocado (${String(e)}); conferido no fechamento do candle`);
+    return pos;
+  }
+}
+
 type ManualOpts = { stopPct: number; targetPct: number | null; trailing: boolean };
 
 async function openFromFill(
@@ -660,6 +707,7 @@ async function openFromFill(
     entry_price: px,
     stop_price: stop,
     stop_client_order_id: null,
+    tp_client_order_id: null,
     entry_client_order_id: fill.cid,
     entry_candle_time: Number(candleTime),
     origin: isManual ? "manual" : "strategy",
@@ -674,6 +722,7 @@ async function openFromFill(
 
   try {
     pos = await placeStop(ctx, symbol, pos, stop, "stop", Number(candleTime));
+    pos = await placeTp(ctx, symbol, pos, "tp", Number(candleTime));
   } catch (e) {
     // posicao sem stop no servidor viola o invariante: sai imediatamente
     await ctx.store.log("error", `${symbol}: stop rejeitado apos entrada - saindo a mercado`, { error: String(e) });
@@ -818,6 +867,18 @@ async function trailStop(ctx: Ctx, symbol: string, pos: Position, sig: Signal): 
 
 async function exitPosition(ctx: Ctx, symbol: string, pos: Position, reason: string, kind: "sell" | "cover" | "kill" | "emsell" | "msell", key: number): Promise<string> {
   const f = ctx.data[symbol].filters;
+  if (pos.tp_client_order_id) {
+    const c = await ctx.venue.cancelStop(symbol, pos.tp_client_order_id);
+    if (!c) {
+      const ex = await ctx.venue.getStop(symbol, pos.tp_client_order_id);
+      if (ex?.status === "FILLED") {
+        await closePosition(ctx, pos, ex.fillPrice ?? ex.stopPrice, "alvo", ex.fillQty ?? pos.qty);
+        return "alvo_executado";
+      }
+    }
+    await ctx.store.updateOrder(pos.tp_client_order_id, { status: "CANCELED" });
+    pos = { ...pos, tp_client_order_id: null };
+  }
   if (pos.stop_client_order_id) {
     const c = await ctx.venue.cancelStop(symbol, pos.stop_client_order_id);
     if (!c) {

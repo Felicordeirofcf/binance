@@ -205,6 +205,20 @@ export function placeStopMarket(symbol: string, side: "BUY" | "SELL", triggerPri
   });
 }
 
+/** Alvo NO SERVIDOR: TAKE_PROFIT_MARKET com closePosition=true (fecha tudo ao tocar o alvo). */
+export function placeTakeProfitMarket(symbol: string, side: "BUY" | "SELL", triggerPrice: string, clientAlgoId: string): Promise<AlgoOrder> {
+  return signed<AlgoOrder>("POST", "/fapi/v1/algoOrder", {
+    algoType: "CONDITIONAL",
+    symbol,
+    side,
+    type: "TAKE_PROFIT_MARKET",
+    triggerPrice,
+    closePosition: "true",
+    workingType: "MARK_PRICE",
+    clientAlgoId,
+  });
+}
+
 export async function getAlgoOrder(clientAlgoId: string): Promise<AlgoOrder | null> {
   try {
     return await signed<AlgoOrder>("GET", "/fapi/v1/algoOrder", { clientAlgoId });

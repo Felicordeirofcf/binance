@@ -146,6 +146,52 @@ describe("futuros: operacao manual com alavancagem", () => {
   });
 });
 
+describe("futuros: alvo de lucro no servidor", () => {
+  it("manual com alvo: TAKE_PROFIT no servidor junto do stop; ao executar, cancela o stop", async () => {
+    const store = new MemoryStore({ ...FUT });
+    const { deps, at } = h(store, 1300);
+    await runOnce(deps, { manual: { type: "buy", symbol: "BTCUSDT", side: "short", leverage: 3, notionalUsdt: 300, stopPct: 6, targetPct: 2, trailing: false } });
+    const p = store.positions[0];
+    const st = fstate(store);
+    const tp = st.stops.find((x) => x.cid === p.tp_client_order_id)!;
+    expect(tp.kind).toBe("tp");
+    expect(tp.side).toBe("BUY");
+    expect(tp.trigger).toBeCloseTo(p.target_price!, 1);
+    expect(store.orders.some((o) => o.kind === "tp")).toBe(true);
+    // anda ate fechar
+    for (at.i = 1301; at.i < ALL.length && store.positions[0].status === "open"; at.i++) await runOnce(deps);
+    const done = store.positions[0];
+    expect(done.status).toBe("closed");
+    const st2 = fstate(store);
+    const tp2 = st2.stops.find((x) => x.cid === done.tp_client_order_id)!;
+    const sl2 = st2.stops.find((x) => x.cid === done.stop_client_order_id)!;
+    if (done.exit_reason === "alvo") {
+      expect(done.exit_price!).toBeCloseTo(done.target_price!, 1); // executou no alvo exato
+      expect(sl2.status).toBe("CANCELED"); // stop que sobrou foi cancelado
+    } else {
+      expect(done.exit_reason).toBe("stop");
+      expect(tp2.status).toBe("CANCELED"); // alvo que sobrou foi cancelado
+    }
+    // nenhuma ordem condicional ficou aberta sem posicao
+    expect(st2.stops.filter((x) => x.status === "NEW").length).toBe(0);
+  });
+
+  it("estrategia com take_profit_pct coloca o alvo no servidor", async () => {
+    const store = new MemoryStore({ ...FUT, enabled: true, short_enabled: true, take_profit_pct: 3, leverage: 2 });
+    const { deps, at } = h(store, 205);
+    for (; at.i < ALL.length; at.i++) await runOnce(deps);
+    const strat = store.positions.filter((p) => p.origin === "strategy");
+    expect(strat.length).toBeGreaterThan(3);
+    expect(strat.every((p) => p.tp_client_order_id)).toBe(true);
+    const alvos = strat.filter((p) => p.exit_reason === "alvo");
+    expect(alvos.length).toBeGreaterThan(0);
+    for (const p of alvos) expect(p.exit_price!).toBeCloseTo(p.target_price!, 1);
+    // ao fim, nao sobra ordem condicional orfa
+    const openIds = new Set(store.positions.filter((p) => p.status === "open").flatMap((p) => [p.stop_client_order_id, p.tp_client_order_id]));
+    expect(fstate(store).stops.filter((x) => x.status === "NEW" && !openIds.has(x.cid)).length).toBe(0);
+  });
+});
+
 describe("futuros: carteira simulada", () => {
   it("liquidacao sem stop consome a margem isolada, nao a carteira toda", async () => {
     const v = new FuturesPaperVenue(FuturesPaperVenue.initial(1000), () => ALL[1300].closeTime + 1);

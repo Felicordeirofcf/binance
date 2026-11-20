@@ -100,6 +100,9 @@ export default function PriceChart({ view, positions, interval }: { view: Symbol
     if (open?.liquidation_price) {
       candles.createPriceLine({ price: open.liquidation_price, color: "#fb923c", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "LIQUIDAÇÃO" });
     }
+    if (open?.target_price) {
+      candles.createPriceLine({ price: open.target_price, color: "#60a5fa", lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: "ALVO" });
+    }
     if (open) {
       candles.createPriceLine({ price: open.stop_price, color: "#f43f5e", lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: "STOP" });
       candles.createPriceLine({ price: open.entry_price, color: "#22d3a0", lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: "ENTRADA" });

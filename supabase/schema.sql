@@ -97,6 +97,7 @@ alter table positions add constraint positions_side_check check (side in ('long'
 alter table positions add column if not exists market text not null default 'spot';
 alter table positions add column if not exists leverage numeric not null default 1;
 alter table positions add column if not exists liquidation_price numeric;
+alter table positions add column if not exists tp_client_order_id text;  -- alvo no servidor (futuros)
 
 -- uma posicao aberta por simbolo, garantido pelo banco
 create unique index if not exists one_open_position_per_symbol

@@ -221,7 +221,7 @@ export default function AutoCard({ state, busy, control }: { state: DashboardSta
           })}
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          O stop (perda) é automático: {cfg.atr_mult}× ATR, no servidor da Binance. Alvos curtos acertam mais vezes, mas cortam os poucos trades grandes que pagam as perdas. Por isso rendem menos no histórico. Não é promessa de resultado.
+          O stop (perda) é automático: {cfg.atr_mult}× ATR, no servidor da Binance.{cfg.market === "futures" ? " Em Futuros o alvo também fica no servidor e executa na hora." : " Em Spot o alvo é conferido no fechamento do candle de 4h."} Alvos curtos acertam mais vezes, mas cortam os poucos trades grandes que pagam as perdas. Por isso rendem menos no histórico. Não é promessa de resultado.
         </p>
       </div>
 

@@ -55,6 +55,8 @@ export type Position = {
   entry_price: number;
   stop_price: number;
   stop_client_order_id: string | null;
+  /** alvo de lucro no servidor (futuros) */
+  tp_client_order_id?: string | null;
   entry_client_order_id: string | null;
   entry_candle_time: number;
   /** strategy = aberta pela regra; manual = aberta por voce no painel */
