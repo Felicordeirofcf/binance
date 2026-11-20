@@ -9,3 +9,4 @@ backtest/results/
 __pycache__/
 *.pyc
 .venv/
+backtest/logs/

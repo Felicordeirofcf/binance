@@ -68,6 +68,9 @@ def add_indicators(df: pd.DataFrame, p: dict) -> pd.DataFrame:
     out["atr"] = atr(out, p["atr_period"])
     out["dc_high"] = donchian_high(out, p["donchian"])
     out["dc_low"] = donchian_low(out, p["donchian_exit"])
+    # espelho para o lado vendido: rompe minima de N, sai na maxima de M
+    out["dc_low_entry"] = donchian_low(out, p["donchian"])
+    out["dc_high_exit"] = donchian_high(out, p["donchian_exit"])
     out["er"] = efficiency_ratio(out["close"], p["er_period"])
     out["adx"] = adx(out, 14)
     return out

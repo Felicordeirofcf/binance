@@ -1,10 +1,17 @@
-"""Motor de backtest: tendencia long-only em spot, com filtro de regime.
+"""Motor de backtest: tendencia com filtro de regime, long OU short.
 
-Regras (identicas as do bot em producao, src/lib/strategy.ts):
+LONG (spot, regras identicas ao bot em producao, src/lib/strategy.ts):
   ENTRADA  close > donchian_high(N)  E  close > ema_trend  E  er >= er_min
   STOP     entry - atr_mult * ATR, trailing (so sobe, nunca desce)
   SAIDA    stop atingido  OU  close < donchian_low(M)
-  SIZING   risco de risk_pct do capital por trade
+
+SHORT (estudo para futuros perpetuos, 1x, NAO implementado no bot):
+  ENTRADA  close < donchian_low(N)   E  close < ema_trend  E  er >= er_min
+  STOP     entry + atr_mult * ATR, trailing (so desce, nunca sobe)
+  SAIDA    stop atingido  OU  close > donchian_high(M)
+  FUNDING  a cada 8h: short recebe quando rate > 0 e paga quando rate < 0
+
+SIZING   risco de risk_pct do capital por trade, notional <= capital (1x)
 
 Execucao conservadora: sinal no fechamento do candle, execucao na
 abertura do candle seguinte, com slippage e taxa. Sem look-ahead.
@@ -17,6 +24,7 @@ import pandas as pd
 from indicators import add_indicators
 
 DEFAULT_PARAMS = {
+    "side": "long",
     "ema_fast": 20,
     "ema_trend": 200,
     "atr_period": 14,
@@ -26,10 +34,9 @@ DEFAULT_PARAMS = {
     "er_period": 20,
     "er_min": 0.30,
     "risk_pct": 0.01,
-    "fee": 0.001,
+    "fee": 0.001,       # spot taker 0,1%; futuros USDT-M taker 0,05%
     "slippage": 0.0005,
 }
-
 
 @dataclass
 class Trade:
@@ -58,28 +65,49 @@ def warmup_bars(p: dict) -> int:
 
 
 def evaluate_row(row, p: dict, has_position: bool) -> tuple[str, str]:
-    """Regra de sinal no fechamento de um candle. Espelho de evaluate() em
-    src/lib/strategy.ts - o teste de paridade compara as duas."""
+    """Regra de sinal no fechamento de um candle. O lado long e espelho de
+    evaluate() em src/lib/strategy.ts - o teste de paridade compara os dois.
+    Retorna "enter" / "exit" / "hold"."""
+    short = p.get("side", "long") == "short"
     if not has_position:
-        if not row["close"] > row["dc_high"]:
-            return "hold", "sem_rompimento"
-        if not row["close"] > row["ema_trend"]:
-            return "hold", "abaixo_da_ema_de_tendencia"
+        if short:
+            if not row["close"] < row["dc_low_entry"]:
+                return "hold", "sem_rompimento"
+            if not row["close"] < row["ema_trend"]:
+                return "hold", "acima_da_ema_de_tendencia"
+        else:
+            if not row["close"] > row["dc_high"]:
+                return "hold", "sem_rompimento"
+            if not row["close"] > row["ema_trend"]:
+                return "hold", "abaixo_da_ema_de_tendencia"
         if not row["er"] >= p["er_min"]:
             return "hold", "regime_lateral"
-        return "buy", "rompimento_em_tendencia"
-    if row["close"] < row["dc_low"]:
-        return "sell", "saida_donchian"
+        return "enter", "rompimento_em_tendencia"
+    if short and row["close"] > row["dc_high_exit"]:
+        return "exit", "saida_donchian"
+    if not short and row["close"] < row["dc_low"]:
+        return "exit", "saida_donchian"
     return "hold", "mantem_posicao"
 
 
 def run_backtest(df: pd.DataFrame, params: dict | None = None,
-                 capital: float = 1000.0, trade_from: int = 0) -> Result:
+                 capital: float = 1000.0, trade_from: int = 0,
+                 funding: pd.DataFrame | None = None) -> Result:
     """trade_from: indice a partir do qual o bot pode operar. Os candles
     anteriores servem so para aquecer indicadores (usado no walk-forward
-    para que o periodo de teste nao opere dados do treino)."""
+    para que o periodo de teste nao opere dados do treino).
+
+    funding: DataFrame [date, rate] com o funding do perpetuo. A taxa e
+    aplicada no candle cujo open coincide com o horario do funding, para
+    posicoes abertas ANTES desse open."""
     p = {**DEFAULT_PARAMS, **(params or {})}
+    sign = -1.0 if p["side"] == "short" else 1.0   # +1 long, -1 short
     d = add_indicators(df, p).reset_index(drop=True)
+    if funding is not None and len(funding):
+        fr = funding.set_index("date")["rate"]
+        d["funding"] = d["date"].map(fr).fillna(0.0)
+    else:
+        d["funding"] = 0.0
     first = max(trade_from, warmup_bars(p))
 
     equity = capital
@@ -89,25 +117,44 @@ def run_backtest(df: pd.DataFrame, params: dict | None = None,
     stop = 0.0
     entry_idx = 0
     entry_date = ""
+    pos_funding = 0.0
+    funding_total = 0.0
     trades: list[Trade] = []
     curve: list[dict] = []
     pending: str | None = None   # sinal gerado no candle anterior
     pending_atr = 0.0            # ATR do candle de sinal (conhecido no fechamento)
 
+    def close_pos(i, row, fill, reason):
+        nonlocal equity, pos_qty, pos_funding
+        gross = sign * pos_qty * (fill - entry_price)
+        _close_position(trades, entry_date, str(row["date"]), entry_price, fill,
+                        pos_qty, i - entry_idx, reason, p["fee"], sign, pos_funding)
+        equity += gross - pos_qty * fill * p["fee"]
+        pos_qty = 0.0
+        pos_funding = 0.0
+
     for i in range(first, len(d)):
         row = d.iloc[i]
 
+        # --- 0. funding (so perpetuo): posicao aberta antes deste open ---
+        if pos_qty > 0 and row["funding"] != 0.0:
+            # rate > 0: long paga, short recebe
+            f = -sign * pos_qty * row["open"] * row["funding"]
+            equity += f
+            pos_funding += f
+            funding_total += f
+
         # --- 1. executa sinal pendente na abertura deste candle ---
-        if pending == "buy" and pos_qty == 0:
-            fill = row["open"] * (1 + p["slippage"])
+        if pending == "enter" and pos_qty == 0:
+            fill = row["open"] * (1 + sign * p["slippage"])
             # stop calculado com o ATR do candle de sinal: o ATR do candle
             # atual inclui high/low que ainda nao aconteceram (look-ahead)
-            stop_candidate = fill - p["atr_mult"] * pending_atr
-            risk_per_unit = fill - stop_candidate
+            stop_candidate = fill - sign * p["atr_mult"] * pending_atr
+            risk_per_unit = sign * (fill - stop_candidate)
             if risk_per_unit > 0:
                 qty = (equity * p["risk_pct"]) / risk_per_unit
                 cost = qty * fill
-                if cost > equity * 0.995:  # nunca alavanca em spot
+                if cost > equity * 0.995:  # nunca alavanca (spot / futuros 1x)
                     qty = equity * 0.995 / fill
                     cost = qty * fill
                 if cost > 10:  # minNotional tipico da Binance
@@ -117,38 +164,30 @@ def run_backtest(df: pd.DataFrame, params: dict | None = None,
                     stop = stop_candidate
                     entry_idx = i
                     entry_date = str(row["date"])
-        elif pending == "sell" and pos_qty > 0:
-            fill = row["open"] * (1 - p["slippage"])
-            _close_position(
-                trades, entry_date, str(row["date"]), entry_price, fill,
-                pos_qty, i - entry_idx, "saida_donchian", p["fee"],
-            )
-            equity += pos_qty * (fill - entry_price) - pos_qty * fill * p["fee"]
-            pos_qty = 0.0
+        elif pending == "exit" and pos_qty > 0:
+            close_pos(i, row, row["open"] * (1 - sign * p["slippage"]), "saida_donchian")
         pending = None
 
         # --- 2. stop intrabar tem prioridade sobre qualquer sinal ---
-        if pos_qty > 0 and row["low"] <= stop:
-            # gap abaixo do stop: executa no open, nao no stop
-            fill = min(stop, row["open"]) * (1 - p["slippage"])
-            _close_position(
-                trades, entry_date, str(row["date"]), entry_price, fill,
-                pos_qty, i - entry_idx, "stop", p["fee"],
-            )
-            equity += pos_qty * (fill - entry_price) - pos_qty * fill * p["fee"]
-            pos_qty = 0.0
-
-        # --- 3. trailing stop: so sobe ---
         if pos_qty > 0:
-            stop = max(stop, row["close"] - p["atr_mult"] * row["atr"])
+            if sign > 0 and row["low"] <= stop:
+                # gap alem do stop: executa no open, nao no stop
+                close_pos(i, row, min(stop, row["open"]) * (1 - p["slippage"]), "stop")
+            elif sign < 0 and row["high"] >= stop:
+                close_pos(i, row, max(stop, row["open"]) * (1 + p["slippage"]), "stop")
+
+        # --- 3. trailing stop: so aperta, nunca afrouxa ---
+        if pos_qty > 0:
+            cand = row["close"] - sign * p["atr_mult"] * row["atr"]
+            stop = max(stop, cand) if sign > 0 else min(stop, cand)
 
         # --- 4. gera sinal para o proximo candle ---
         action, _ = evaluate_row(row, p, pos_qty > 0)
-        if action in ("buy", "sell"):
+        if action in ("enter", "exit"):
             pending = action
             pending_atr = float(row["atr"])
 
-        mark = equity + (pos_qty * (row["close"] - entry_price) if pos_qty else 0)
+        mark = equity + (sign * pos_qty * (row["close"] - entry_price) if pos_qty else 0)
         peak = max(peak, mark)
         curve.append({
             "date": str(row["date"]),
@@ -166,20 +205,21 @@ def run_backtest(df: pd.DataFrame, params: dict | None = None,
         res.metrics["buy_and_hold_pct"] = round(
             float(closes.iloc[-1] / closes.iloc[0] - 1) * 100, 2)
         res.metrics["buy_and_hold_max_dd_pct"] = round(float(bh_dd), 2)
+        res.metrics["funding_liquido_usdt"] = round(funding_total, 2)
         res.metrics["posicao_aberta_no_fim"] = bool(pos_qty > 0)
         res.metrics["periodo"] = f'{curve[0]["date"][:10]} a {curve[-1]["date"][:10]}'
     return res
 
 
 def _close_position(trades, entry_date, exit_date, entry, exit_px, qty, bars,
-                    reason, fee=DEFAULT_PARAMS["fee"]):
-    # PnL liquido de taxa de entrada e saida: trade "vencedor" bruto que
-    # perde para a taxa e perda
-    pnl = qty * (exit_px - entry) - qty * (entry + exit_px) * fee
+                    reason, fee=DEFAULT_PARAMS["fee"], sign=1.0, funding=0.0):
+    # PnL liquido de taxa de entrada e saida e de funding: trade "vencedor"
+    # bruto que perde para a taxa e perda
+    pnl = sign * qty * (exit_px - entry) - qty * (entry + exit_px) * fee + funding
     trades.append(Trade(
         entry_date=entry_date, exit_date=exit_date, entry=round(entry, 4),
         exit=round(exit_px, 4), qty=round(qty, 8), pnl=round(pnl, 2),
-        pnl_pct=round((exit_px / entry - 1) * 100, 2), bars=bars, reason=reason,
+        pnl_pct=round((sign * (exit_px / entry - 1)) * 100, 2), bars=bars, reason=reason,
     ))
 
 

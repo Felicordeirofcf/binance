@@ -48,7 +48,9 @@ def score(metrics: dict) -> float:
     return ret / max(dd, 1)
 
 
-def walk_forward(df: pd.DataFrame, verbose: bool = True) -> dict:
+def walk_forward(df: pd.DataFrame, verbose: bool = True, base: dict | None = None,
+                 funding: pd.DataFrame | None = None) -> dict:
+    base = base or {}
     keys = list(GRID)
     combos = [dict(zip(keys, v)) for v in itertools.product(*GRID.values())]
     folds = []
@@ -61,11 +63,11 @@ def walk_forward(df: pd.DataFrame, verbose: bool = True) -> dict:
 
         best, best_score = None, -1e9
         for c in combos:
-            s = score(run_backtest(train, c, trade_from=WARMUP).metrics)
+            s = score(run_backtest(train, {**base, **c}, trade_from=WARMUP, funding=funding).metrics)
             if s > best_score:
                 best, best_score = c, s
 
-        oos = run_backtest(test, best, trade_from=WARMUP)
+        oos = run_backtest(test, {**base, **best}, trade_from=WARMUP, funding=funding)
         folds.append({
             "treino": f'{df["date"].iloc[train_start]:%Y-%m-%d} a {df["date"].iloc[test_start - 1]:%Y-%m-%d}',
             "teste": oos.metrics.get("periodo"),
@@ -116,6 +118,7 @@ def walk_forward(df: pd.DataFrame, verbose: bool = True) -> dict:
         f.pop("oos_trades")
     return {
         "grade": GRID,
+        "base": base,
         "folds": folds,
         "resumo_out_of_sample": {
             "periodos": len(folds),
@@ -131,6 +134,8 @@ def walk_forward(df: pd.DataFrame, verbose: bool = True) -> dict:
             "trades_oos": len(pnls),
             "profit_factor_oos": round(gains / losses, 2) if losses > 0 else None,
             "maior_sequencia_perdas_oos": max_streak,
+            "funding_liquido_oos_pct": round(sum(
+                (f["out_of_sample"].get("funding_liquido_usdt") or 0) / 10 for f in folds), 2),
             "estabilidade_parametros": round(stability, 2),
             "frequencia_por_parametro": per_param,
         },
@@ -138,12 +143,23 @@ def walk_forward(df: pd.DataFrame, verbose: bool = True) -> dict:
 
 
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 else "data/BTCUSDT_4h.csv"
-    df = pd.read_csv(path, parse_dates=["date"])
-    out = walk_forward(df)
-    name = os.path.splitext(os.path.basename(path))[0]
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("csv", nargs="?", default="data/BTCUSDT_4h.csv")
+    ap.add_argument("--side", default="long", choices=["long", "short"])
+    ap.add_argument("--fee", type=float, default=None,
+                    help="taxa por lado (spot 0.001, futuros taker 0.0005)")
+    ap.add_argument("--funding", default=None, help="CSV de funding do perpetuo")
+    a = ap.parse_args()
+    df = pd.read_csv(a.csv, parse_dates=["date"])
+    base = {"side": a.side}
+    if a.fee is not None:
+        base["fee"] = a.fee
+    fund = pd.read_csv(a.funding, parse_dates=["date"]) if a.funding else None
+    out = walk_forward(df, base=base, funding=fund)
+    name = os.path.splitext(os.path.basename(a.csv))[0]
     os.makedirs("results", exist_ok=True)
-    dest = f"results/walkforward_{name}.json"
+    dest = f"results/walkforward_{name}_{a.side}.json"
     with open(dest, "w") as f:
         json.dump(out, f, indent=2, ensure_ascii=False, default=str)
     print("\n" + json.dumps(out["resumo_out_of_sample"], indent=2, ensure_ascii=False))
