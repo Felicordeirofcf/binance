@@ -7,6 +7,7 @@ import Radar from "./Radar";
 import { CapitalCard, ExpectationCard } from "./Capital";
 import ManualTrade from "./ManualTrade";
 import MarketCard from "./MarketCard";
+import { setTheme, useTheme } from "./theme";
 import { ago, dt, pct, price, reason, usd } from "./format";
 import { AnimatedNumber, Badge, Button, Card, Meter, Modal, Stat, Tabs, Toasts, type ToastMsg } from "./ui";
 
@@ -29,6 +30,7 @@ export default function Dashboard() {
   const [left, setLeft] = useState(REFRESH_S);
   const [, force] = useState(0);
   const loading = useRef(false);
+  const theme = useTheme();
 
   const toast = useCallback((tone: ToastMsg["tone"], text: string) => {
     const id = Date.now() + Math.random();
@@ -137,6 +139,14 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-2">
           <span className="hidden text-xs text-slate-500 sm:inline">última execução {ago(stats.lastRunAt)}</span>
+          <button
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            title={theme === "light" ? "Modo escuro" : "Modo claro"}
+            aria-label="alternar tema"
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-base ring-1 ring-white/10 transition hover:bg-white/10"
+          >
+            {theme === "light" ? "☾" : "☀"}
+          </button>
           <button onClick={load} title="Atualizar (r)" className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 ring-1 ring-white/10 hover:bg-white/10">
             <svg viewBox="0 0 36 36" className="absolute inset-0 -rotate-90">
               <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(96,165,250,0.6)" strokeWidth="2" strokeDasharray={`${(left / REFRESH_S) * 94.2} 94.2`} strokeLinecap="round" className="transition-all duration-1000" />
@@ -233,7 +243,7 @@ export default function Dashboard() {
                   className={`relative h-7 w-12 rounded-full transition ${cfg.enabled ? "bg-emerald-500/70" : "bg-white/10"}`}
                   aria-label="ligar/desligar"
                 >
-                  <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${cfg.enabled ? "left-6" : "left-1"}`} />
+                  <span style={{ background: "#ffffff" }} className={`absolute top-1 h-5 w-5 rounded-full shadow transition-all ${cfg.enabled ? "left-6" : "left-1"}`} />
                 </button>
               </label>
               <div className="grid grid-cols-2 gap-2">

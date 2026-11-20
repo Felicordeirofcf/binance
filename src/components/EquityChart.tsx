@@ -2,12 +2,15 @@
 import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { EquityView } from "@/lib/dashboard-types";
 import { dt, usd } from "./format";
+import { chartColors, useTheme } from "./theme";
 
 export default function EquityChart({ data, mode, killAt }: { data: EquityView[]; mode: "equity" | "drawdown"; killAt: number }) {
+  const cc = chartColors(useTheme());
   if (data.length < 2) {
     return <div className="flex h-56 items-center justify-center text-sm text-slate-500">A curva aparece após as primeiras execuções do cron.</div>;
   }
   const rows = data.map((d) => ({ ...d, ts: Date.parse(d.t) }));
+
   const up = rows[rows.length - 1].equity >= rows[0].equity;
   return (
     <div className="h-56 w-full">
@@ -23,10 +26,10 @@ export default function EquityChart({ data, mode, killAt }: { data: EquityView[]
               <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.4} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
-          <XAxis dataKey="ts" type="number" domain={["dataMin", "dataMax"]} tickFormatter={(v) => new Date(v).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} stroke="#475569" fontSize={11} tickLine={false} axisLine={false} minTickGap={40} />
+          <CartesianGrid stroke={cc.grid} vertical={false} />
+          <XAxis dataKey="ts" type="number" domain={["dataMin", "dataMax"]} tickFormatter={(v) => new Date(v).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} stroke={cc.axis} fontSize={11} tickLine={false} axisLine={false} minTickGap={40} />
           <YAxis
-            stroke="#475569"
+            stroke={cc.axis}
             fontSize={11}
             tickLine={false}
             axisLine={false}
@@ -35,7 +38,7 @@ export default function EquityChart({ data, mode, killAt }: { data: EquityView[]
             tickFormatter={(v) => (mode === "drawdown" ? `${Number(v).toFixed(0)}%` : usd(Number(v), 0))}
           />
           <Tooltip
-            contentStyle={{ background: "#0a0e18", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, fontSize: 12 }}
+            contentStyle={{ background: cc.tooltipBg, border: `1px solid ${cc.tooltipBorder}`, borderRadius: 12, fontSize: 12 }}
             labelFormatter={(v) => dt(Number(v))}
             formatter={(v) => (mode === "drawdown" ? [`${Number(v).toFixed(2)}%`, "Drawdown"] : [`${usd(Number(v))} USDT`, "Equity"])}
           />

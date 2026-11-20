@@ -16,6 +16,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { PositionView, SymbolView } from "@/lib/dashboard-types";
 import { price as fmtPrice } from "./format";
+import { chartColors, useTheme } from "./theme";
 
 type Overlays = { ema: boolean; donchian: boolean; volume: boolean; trades: boolean };
 
@@ -24,16 +25,18 @@ export default function PriceChart({ view, positions, interval }: { view: Symbol
   const chartRef = useRef<IChartApi | null>(null);
   const [ov, setOv] = useState<Overlays>({ ema: true, donchian: true, volume: true, trades: true });
   const [hover, setHover] = useState<{ o: number; h: number; l: number; c: number; t: number } | null>(null);
+  const theme = useTheme();
 
   useEffect(() => {
     if (!box.current) return;
+    const cc = chartColors(theme);
     const chart = createChart(box.current, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#8b95a7", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11 },
-      grid: { vertLines: { color: "rgba(255,255,255,0.03)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
-      timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: true, secondsVisible: false, rightOffset: 6 },
-      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "rgba(148,163,184,0.35)", labelBackgroundColor: "#1a2236" }, horzLine: { color: "rgba(148,163,184,0.35)", labelBackgroundColor: "#1a2236" } },
+      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: cc.text, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11 },
+      grid: { vertLines: { color: cc.grid }, horzLines: { color: cc.grid } },
+      rightPriceScale: { borderColor: cc.border },
+      timeScale: { borderColor: cc.border, timeVisible: true, secondsVisible: false, rightOffset: 6 },
+      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: cc.cross, labelBackgroundColor: cc.label }, horzLine: { color: cc.cross, labelBackgroundColor: cc.label } },
       localization: { priceFormatter: (p: number) => fmtPrice(p) },
     });
     chartRef.current = chart;
@@ -111,7 +114,7 @@ export default function PriceChart({ view, positions, interval }: { view: Symbol
       chart.remove();
       chartRef.current = null;
     };
-  }, [view, positions, ov, interval]);
+  }, [view, positions, ov, interval, theme]);
 
   const range = (n: number) => {
     const ts = chartRef.current?.timeScale();
