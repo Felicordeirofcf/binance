@@ -55,6 +55,7 @@ export type DcaState = {
   cost: number; // custo das moedas restantes (USDT, com taxas)
   sold_partial: boolean;
   buy_cid: string | null; // compra limite aberta
+  buy_price?: number | null; // preco dessa compra limite
   tp_cid: string | null; // venda limite aberta
   tp_price: number | null;
   tp_qty: number | null;

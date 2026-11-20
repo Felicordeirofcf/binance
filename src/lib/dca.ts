@@ -222,6 +222,7 @@ async function reconcile(ctx: Ctx) {
       await ctx.store.updateOrder(st.buy_cid, { status: "FILLED", raw: { response: o, note: "compra na queda executada" } });
       applyBuy(ctx, o);
       st.buy_cid = null;
+      st.buy_price = null;
       await ctx.notify("entrada", `Acumulacao ${row.symbol}: compra ${st.buys}/${row.max_buys} a ${avgFillPrice(o).toFixed(2)}`);
     } else if (!o || ["CANCELED", "EXPIRED", "REJECTED"].includes(o.status)) {
       st.buy_cid = null;
@@ -281,9 +282,19 @@ async function startCycle(ctx: Ctx) {
 }
 
 async function ensureNextBuy(ctx: Ctx) {
-  const { row, st, f } = ctx;
-  if (st.buy_cid || st.buys === 0 || st.buys >= row.max_buys || !st.last_buy_price) return;
+  const { row, f } = ctx;
+  let st = ctx.st;
+  if (st.buys === 0 || !st.last_buy_price) return;
   const level = roundStep(st.last_buy_price * (1 - row.drop_pct / 100), f.tickSize);
+  // configuracao mudou (queda % ou parcelas): a compra que esperava sai e entra a nova
+  if (st.buy_cid && (st.buys >= row.max_buys || (st.buy_price != null && Math.abs(st.buy_price - level) > f.tickSize / 2) || st.buy_price == null)) {
+    const before = ctx.st.buys;
+    await cancelBuy(ctx);
+    // se ela executou no meio do cancelamento, o proximo nivel parte dessa compra
+    if (ctx.st.buys === before) ctx.events.push(`compra na queda reposicionada para ${level.toFixed(2)}`);
+    return ensureNextBuy(ctx);
+  }
+  if (st.buy_cid || st.buys >= row.max_buys) return;
   const usd = parcel(row);
   // nunca investe alem do capital da aba
   if (st.cost + usd > row.capital_usdt * 1.01 + 1e-9) return;
@@ -299,6 +310,7 @@ async function ensureNextBuy(ctx: Ctx) {
     applyBuy(ctx, o); // preco ja estava abaixo do nivel: executou na hora
   } else if (o.status === "NEW" || o.status === "PARTIALLY_FILLED") {
     st.buy_cid = o.clientOrderId;
+    st.buy_price = level;
   }
 }
 
@@ -337,6 +349,7 @@ async function cancelBuy(ctx: Ctx) {
   }
   await ctx.store.updateOrder(ctx.st.buy_cid, { status: c ? "CANCELED" : "FILLED" });
   ctx.st.buy_cid = null;
+  ctx.st.buy_price = null;
 }
 
 async function cancelTp(ctx: Ctx) {

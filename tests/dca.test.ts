@@ -145,6 +145,26 @@ describe("acumulacao spot", () => {
     await expect(runDca(harness(store, path([100])).deps)).rejects.toThrow(/mesmo|Spot real/);
   });
 
+  it("mudar a queda % reposiciona a compra que estava esperando", async () => {
+    const c = path([100, 99]);
+    const store = new MemoryStore();
+    store.dca = { ...store.dca, enabled: true, drop_pct: 10 };
+    const { deps, at } = harness(store, c);
+    at.i = 1;
+    await runDca(deps);
+    const old = store.dca.state.buy_cid;
+    const lb = store.dca.state.last_buy_price!;
+    expect(store.dca.state.buy_price).toBeCloseTo(lb * 0.9, 1);
+    store.dca.drop_pct = 3;
+    await runDca(deps);
+    expect(store.dca.state.buy_cid).not.toBe(old);
+    expect(store.dca.state.buy_price).toBeCloseTo(lb * 0.97, 1);
+    expect(store.orders.find((o) => o.client_order_id === old)?.status).toBe("CANCELED");
+    // so uma compra limite aberta
+    const open = store.dca.paper_state!.orders.filter((o) => o.status === "NEW" && o.side === "BUY");
+    expect(open.length).toBe(1);
+  });
+
   it("desligado e sem posicao: nao faz nada", async () => {
     const store = new MemoryStore();
     const r = await runDca(harness(store, path([100])).deps);
