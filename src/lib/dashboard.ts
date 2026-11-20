@@ -1,5 +1,6 @@
 import "server-only";
-import { getKlinesForDisplay } from "./binance";
+import { getFilters, getKlinesForDisplay } from "./binance";
+import { getFuturesFilters } from "./futures";
 import type { DashboardState, LinePoint, PositionView, SymbolView } from "./dashboard-types";
 import { atr, donchianHigh, donchianLow, efficiencyRatio, ema } from "./indicators";
 import { evaluate, evaluateShort } from "./strategy";
@@ -55,8 +56,16 @@ async function symbolView(cfg: BotConfig, symbol: string, hasPosition: boolean):
       const c = closed[closed.length - 1].close;
       radarShort = { dcLow: Number.isFinite(s.dcLow) ? s.dcLow : null, breakdown: c < s.dcLow, belowEma: c < s.emaTrend, regimeOk: s.regimeOk, action: s.action, reason: s.reason };
     }
+    let filters: SymbolView["filters"] = null;
+    try {
+      const f = cfg.market === "futures" ? await getFuturesFilters(symbol) : await getFilters(symbol);
+      filters = { minQty: f.minQty, minNotional: f.minNotional, stepSize: f.stepSize };
+    } catch {
+      filters = null;
+    }
     return {
       symbol,
+      filters,
       radarShort,
       price: all.length ? all[all.length - 1].close : null,
       candles: all.slice(from).map((c) => ({
@@ -180,6 +189,14 @@ export async function buildDashboard(): Promise<DashboardState> {
       winRate: closed.length ? (wins.length / closed.length) * 100 : null,
       profitFactor: loss > 0 ? gross / loss : null,
       lastRunAt: lastEq ? String(lastEq.created_at) : null,
+      lastEvent: (() => {
+        const l = (logR.data ?? []).find((x: { message: string }) => !/^(bot |capital|mercado|teto|modo|kill switch REARMADO|carteira)/.test(x.message));
+        return l ? { level: String(l.level), message: String(l.message), at: String(l.created_at) } : null;
+      })(),
+      recentError: (() => {
+        const e = (logR.data ?? []).find((x: { level: string; created_at: string }) => x.level === "error" && Date.now() - Date.parse(x.created_at) < 3 * 3_600_000);
+        return e ? { message: String(e.message), at: String(e.created_at) } : null;
+      })(),
     },
     symbols,
     positions,

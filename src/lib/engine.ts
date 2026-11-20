@@ -119,7 +119,8 @@ type Ctx = {
   persistPaper: () => Promise<void>;
 };
 
-export type RunOptions = { forceKill?: string; manual?: ManualRequest };
+/** snapshotOnly: reconcilia e grava o capital atual, sem rodar a estrategia. */
+export type RunOptions = { forceKill?: string; manual?: ManualRequest; snapshotOnly?: boolean };
 
 // ------------------------------------------------------------------ entrada
 
@@ -249,6 +250,8 @@ async function runLocked(deps: EngineDeps, opts: RunOptions): Promise<RunResult>
     await ctx.persistPaper();
     return { status, ...base, equity: e.equity, drawdownPct: (e.equity / peak - 1) * 100, symbols: reports, manual };
   };
+
+  if (opts.snapshotOnly) return finish(cfg.enabled ? "ok" : "disabled");
 
   // --- operacao manual: substitui a etapa da estrategia nesta execucao ---
   if (opts.manual) {

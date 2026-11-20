@@ -28,6 +28,8 @@ export type SymbolView = {
   } | null;
   /** condicoes do lado vendido (so futuros com vendido ligado) */
   radarShort?: { dcLow: number | null; breakdown: boolean; belowEma: boolean; regimeOk: boolean; action: string; reason: string } | null;
+  /** filtros da exchange no mercado atual (para mostrar o minimo operavel) */
+  filters?: { minQty: number; minNotional: number; stepSize: number } | null;
   error?: string;
 };
 
@@ -117,6 +119,10 @@ export type DashboardState = {
     winRate: number | null;
     profitFactor: number | null;
     lastRunAt: string | null;
+    /** ultimo log relevante da engine (por que agiu ou nao) */
+    lastEvent: { level: string; message: string; at: string } | null;
+    /** ultimo erro nas ultimas 3 horas */
+    recentError: { message: string; at: string } | null;
   };
   symbols: SymbolView[];
   positions: PositionView[];

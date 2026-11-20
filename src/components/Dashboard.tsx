@@ -138,7 +138,7 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="hidden text-xs text-slate-500 sm:inline">última execução {ago(stats.lastRunAt)}</span>
+          <Health state={state} />
           <button
             onClick={() => setTheme(theme === "light" ? "dark" : "light")}
             title={theme === "light" ? "Modo escuro" : "Modo claro"}
@@ -283,7 +283,7 @@ export default function Dashboard() {
           <MarketCard state={state} busy={busy !== null} control={control} />
         </Card>
         <Card title="Capital alocado" delay={380}>
-          <CapitalCard state={state} busy={busy !== null} onSave={(capital) => control("set_capital", { capital })} />
+          <CapitalCard state={state} busy={busy !== null} onSave={(capital, teto) => control("set_capital", { capital, max_position_usdt: teto })} />
         </Card>
         </div>
       </div>
@@ -385,6 +385,46 @@ const LABEL: Record<string, string> = {
   manual_buy: "Compra manual",
   close_position: "Posição encerrada",
 };
+
+/** "O bot esta operando?" em um olhar: cron em dia, ligado, sem erro recente. */
+function Health({ state }: { state: DashboardState }) {
+  const { stats, config: cfg } = state;
+  const last = stats.lastRunAt ? Date.parse(stats.lastRunAt) : 0;
+  const ageMin = last ? (Date.now() - last) / 60_000 : Infinity;
+  const next = new Date();
+  next.setUTCMinutes(2, 0, 0);
+  if (next.getTime() <= Date.now()) next.setUTCHours(next.getUTCHours() + 1);
+  const late = ageMin > 75; // cron horario: mais de 1h15 sem rodar = problema
+  const status = cfg.killed_at
+    ? { tone: "down" as const, text: "Parado pelo kill switch" }
+    : late
+      ? { tone: "down" as const, text: "Cron atrasado" }
+      : stats.recentError
+        ? { tone: "warn" as const, text: "Rodando com erro" }
+        : cfg.enabled
+          ? { tone: "up" as const, text: "Operando" }
+          : { tone: "slate" as const, text: "Monitorando (desligado)" };
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-1.5 ring-1 ring-white/10 hover:bg-white/10">
+        <Badge tone={status.tone} pulse={status.tone === "up"}>{status.text}</Badge>
+        <span className="hidden text-xs text-slate-500 md:inline">última {ago(stats.lastRunAt)} · próxima {next.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+      </button>
+      {open && (
+        <div className="glass absolute right-0 z-40 mt-2 w-80 rounded-2xl p-4 text-xs animate-fade-up">
+          <div className="space-y-1.5 text-slate-300">
+            <p><b className="text-slate-100">Execução automática:</b> toda hora no minuto 2 (Vercel Cron). Última {ago(stats.lastRunAt)}{stats.lastRunAt ? ` (${dt(stats.lastRunAt)})` : ""}.</p>
+            <p><b className="text-slate-100">Bot:</b> {cfg.enabled ? "ligado: abre e fecha posições" : "desligado: só monitora"} · {cfg.dry_run ? "papel" : "dinheiro real"} · {cfg.market === "futures" ? `Futuros ${cfg.leverage}x` : "Spot"}</p>
+            {stats.lastEvent && <p><b className="text-slate-100">Último resultado:</b> {stats.lastEvent.message} <span className="text-slate-500">({ago(stats.lastEvent.at)})</span></p>}
+            {stats.recentError && <p className="text-rose-300"><b>Erro recente:</b> {stats.recentError.message}</p>}
+            <p className="text-slate-500">Os candles são de 4h: na maioria das horas o bot só confere stops e não opera. Detalhes nas abas Sinais e Logs.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Spinner() {
   return <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />;

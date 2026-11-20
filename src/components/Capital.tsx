@@ -6,9 +6,38 @@ import { pct, usd } from "./format";
 import { Button, Modal } from "./ui";
 
 /** Campo de capital alocado + previa do que esse valor significa em risco. */
-export function CapitalCard({ state, busy, onSave }: { state: DashboardState; busy: boolean; onSave: (capital: number | null) => void }) {
+/** Menor capital e teto com que o bot consegue abrir posicao agora (filtros reais da exchange). */
+export function minOperable(state: DashboardState, symbol?: string) {
+  const v = state.symbols.find((s) => s.symbol === (symbol ?? state.config.symbols[0]));
+  if (!v?.filters || !v.radar || !v.price) return null;
+  const { minQty, minNotional, stepSize } = v.filters;
+  const px = v.price;
+  const step = stepSize > 0 ? stepSize : minQty;
+  const q0 = Math.max(minQty, Math.ceil(minNotional / px / step - 1e-9) * step);
+  const riskPerUnit = state.config.atr_mult * v.radar.atr;
+  const lev = state.config.market === "futures" ? state.config.leverage : 1;
+  const notional = q0 * px;
+  return {
+    symbol: v.symbol,
+    minQty: q0,
+    minNotional: notional,
+    /** capital para que 1% de risco compre a quantidade minima */
+    capital: (q0 * riskPerUnit) / state.config.risk_pct,
+    /** teto por posicao necessario */
+    teto: notional * 1.02,
+    margin: notional / lev,
+    /** entrada manual minima (USDT) */
+    manualMin: notional,
+  };
+}
+
+const onlyNumber = (v: string) => v.replace(/[^0-9.,]/g, "").replace(",", ".");
+
+export function CapitalCard({ state, busy, onSave }: { state: DashboardState; busy: boolean; onSave: (capital: number | null, teto?: number) => void }) {
   const cfg = state.config;
   const [value, setValue] = useState(cfg.capital_usdt ? String(cfg.capital_usdt) : "");
+  const [teto, setTeto] = useState(String(cfg.max_position_usdt));
+  const mo = minOperable(state);
   const [confirm, setConfirm] = useState<null | number | "clear">(null);
   const parsed = Number(value.replace(",", "."));
   const valid = value.trim() !== "" && Number.isFinite(parsed) && parsed >= 10;
@@ -38,13 +67,19 @@ export function CapitalCard({ state, busy, onSave }: { state: DashboardState; bu
           <input
             inputMode="decimal"
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => setValue(onlyNumber(e.target.value))}
+            autoComplete="off"
             placeholder="ex.: 500"
             className="num w-full rounded-xl bg-white/5 py-2 pr-14 pl-3 text-sm ring-1 ring-white/10 outline-none focus:ring-sky-400/50"
           />
           <span className="pointer-events-none absolute top-2 right-3 text-xs text-slate-500">USDT</span>
         </div>
         <Button tone="up" disabled={!valid || busy || parsed === cfg.capital_usdt} onClick={() => setConfirm(parsed)}>Salvar</Button>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-xs text-slate-400">Teto por posição</span>
+        <input inputMode="decimal" autoComplete="off" value={teto} onChange={(e) => setTeto(onlyNumber(e.target.value))} className="num w-full rounded-xl bg-white/5 px-3 py-1.5 text-sm ring-1 ring-white/10 outline-none focus:ring-sky-400/50" />
+        <Button disabled={busy || !(Number(teto) >= 5) || Number(teto) === cfg.max_position_usdt} onClick={() => onSave(cfg.capital_usdt, Number(teto))}>Salvar teto</Button>
       </div>
       {value.trim() !== "" && !valid && <p className="text-xs text-rose-300">Mínimo de 10 USDT.</p>}
       {above && <p className="text-xs text-amber-300">Maior que o saldo da conta ({usd(account)}): o bot usa no máximo o que existe.</p>}
@@ -59,6 +94,17 @@ export function CapitalCard({ state, busy, onSave }: { state: DashboardState; bu
           <div className="text-rose-300">−{usd(killLoss)} <span className="text-slate-500">(−{cfg.max_drawdown_pct}%)</span></div>
         </div>
       </div>
+      {mo && (
+        <div className={`rounded-xl p-3 text-xs ring-1 ${(state.stats.equity ?? 0) >= mo.capital && cfg.max_position_usdt >= mo.teto ? "bg-emerald-500/5 ring-emerald-400/20" : "bg-amber-400/5 ring-amber-400/25"}`}>
+          <div className="mb-1 font-medium text-slate-200">Mínimo para o bot operar {mo.symbol} agora</div>
+          <div className="num grid grid-cols-2 gap-x-3 gap-y-0.5 text-slate-400">
+            <span>capital do bot</span><span className={(state.stats.equity ?? 0) >= mo.capital ? "text-emerald-300" : "text-amber-300"}>≥ {usd(mo.capital)} USDT</span>
+            <span>teto por posição</span><span className={cfg.max_position_usdt >= mo.teto ? "text-emerald-300" : "text-amber-300"}>≥ {usd(mo.teto)} USDT</span>
+            <span>menor ordem</span><span className="text-slate-300">{mo.minQty} ({usd(mo.minNotional)} USDT{cfg.market === "futures" ? ` · margem ${usd(mo.margin)}` : ""})</span>
+          </div>
+          <p className="mt-1.5 text-[11px] text-slate-500">Com risco de {(cfg.risk_pct * 100).toFixed(0)}% e stop de {cfg.atr_mult}× ATR, a menor ordem aceita pela Binance arrisca {usd((mo.capital * cfg.risk_pct))} USDT. Muda com o preço e a volatilidade.</p>
+        </div>
+      )}
       {cfg.max_position_usdt > 0 && (
         <p className="text-[11px] leading-relaxed text-slate-500">
           Cada compra também é limitada a {usd(cfg.max_position_usdt, 0)} USDT (teto por posição). Com esse teto, o risco real por trade pode ficar abaixo de 1%.

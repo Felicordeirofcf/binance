@@ -16,7 +16,7 @@ type Body =
   | { action: "rearm"; confirm: string }
   | { action: "run_now" }
   | { action: "test_telegram" }
-  | { action: "set_capital"; capital: number | null }
+  | { action: "set_capital"; capital: number | null; max_position_usdt?: number }
   | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; side?: "long" | "short"; leverage?: number; confirm: string }
   | { action: "set_market"; market: "spot" | "futures"; leverage: number; short_enabled: boolean; confirm: string }
   | { action: "close_position"; symbol: string; confirm: string }
@@ -87,12 +87,26 @@ export async function POST(req: Request) {
           return NextResponse.json({ error: "capital deve ser um numero entre 10 e 10.000.000 USDT (ou vazio para usar a conta inteira)" }, { status: 400 });
         }
         const capital = c === null ? null : Math.round(c * 100) / 100;
+        const teto = body.max_position_usdt;
+        if (teto !== undefined && !(typeof teto === "number" && teto >= 5 && teto <= 10_000_000)) {
+          return NextResponse.json({ error: "teto por posicao entre 5 e 10.000.000 USDT" }, { status: 400 });
+        }
+        if (teto !== undefined && teto !== cfg.max_position_usdt) {
+          await store.updateConfig({ max_position_usdt: Math.round(teto * 100) / 100 });
+          await store.log("warn", `teto por posicao: ${cfg.max_position_usdt} -> ${teto} USDT`);
+        }
+        if (capital === cfg.capital_usdt) {
+          await runOnce(engineDeps(), { snapshotOnly: true });
+          return NextResponse.json({ ok: true });
+        }
         // novo capital = nova base: o drawdown do kill switch recomeca daqui
         await store.updateConfig({ capital_usdt: capital, capital_set_at: new Date().toISOString(), peak_equity: null });
         await store.log("warn", capital === null ? "capital alocado removido: bot usa a conta inteira" : `capital alocado definido em ${capital} USDT`, {
           antes: cfg.capital_usdt,
           depois: capital,
         });
+        // grava o capital novo agora (o painel mostra o ultimo registro)
+        await runOnce(engineDeps(), { snapshotOnly: true });
         return NextResponse.json({ ok: true });
       }
 
@@ -135,6 +149,7 @@ export async function POST(req: Request) {
         if (market !== cfg.market) patch.peak_equity = null;
         await store.updateConfig(patch);
         await store.log("warn", `mercado: ${market}${market === "futures" ? ` ${leverage}x, vendido ${short ? "LIGADO" : "desligado"}` : ""}`, { antes: { market: cfg.market, leverage: cfg.leverage, short: cfg.short_enabled } });
+        await runOnce(engineDeps(), { snapshotOnly: true });
         return NextResponse.json({ ok: true });
       }
 

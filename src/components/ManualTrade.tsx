@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DashboardState, PositionView } from "@/lib/dashboard-types";
 import { pct, price, usd } from "./format";
 import { Badge, Button, Modal } from "./ui";
+import { minOperable } from "./Capital";
 
 type Sim = {
   price: number;
@@ -198,7 +199,7 @@ export default function ManualTrade({ state, busy, control }: { state: Dashboard
                 <div className="num flex justify-between text-[10px] text-slate-500">{Array.from({ length: 10 }, (_, i) => <span key={i}>{i + 1}x</span>)}</div>
               </Field>
             )}
-            <Field label={futures ? "Tamanho da posição (USDT)" : "Valor da compra (USDT)"} hint={<span className="flex gap-1.5">{[10, 25, 50].map((k) => <button key={k} className={chip} onClick={() => setNotional(((capital * k) / 100).toFixed(2))}>{k}% do capital</button>)}</span>}>
+            <Field label={`${futures ? "Tamanho da posição" : "Valor da compra"} (USDT)${minOperable(state, symbol) ? ` · mínimo ${usd(minOperable(state, symbol)!.manualMin)}` : ""}`} hint={<span className="flex gap-1.5">{[10, 25, 50].map((k) => <button key={k} className={chip} onClick={() => setNotional(((capital * k) / 100).toFixed(2))}>{k}% do capital</button>)}</span>}>
               <input className={inputCls} inputMode="decimal" value={notional} onChange={(e) => setNotional(e.target.value)} placeholder="ex.: 100" />
             </Field>
             <div className="grid grid-cols-2 gap-3">
