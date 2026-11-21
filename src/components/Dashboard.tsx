@@ -10,6 +10,7 @@ import MarketCard from "./MarketCard";
 import AutoCard from "./AutoCard";
 import Alerts from "./Alerts";
 import DcaTab from "./DcaTab";
+import SpotSimple from "./SpotSimple";
 import ConfigTab from "./ConfigTab";
 import { setTheme, useTheme } from "./theme";
 import { ago, dt, pct, price, reason, usd } from "./format";
@@ -219,7 +220,18 @@ export default function Dashboard() {
       {page === "config" ? (
         <ConfigTab state={state} toast={(ok, t) => toast(ok ? "up" : "down", t)} />
       ) : page === "dca" ? (
-        <DcaTab state={state} busy={busy !== null} control={control} />
+        <div className="space-y-4">
+          <SpotSimple state={state} busy={busy !== null} control={control} />
+          <details className="group">
+            <summary className="glass cursor-pointer list-none rounded-2xl px-5 py-3 text-sm text-slate-400 hover:text-slate-200">
+              <span className="group-open:hidden">▸ Ver detalhes e ajustes avançados</span>
+              <span className="hidden group-open:inline">▾ Esconder detalhes</span>
+            </summary>
+            <div className="mt-4">
+              <DcaTab state={state} busy={busy !== null} control={control} />
+            </div>
+          </details>
+        </div>
       ) : (
       <>
 
@@ -467,6 +479,7 @@ const LABEL: Record<string, string> = {
   dca_sell_partial: "Realização parcial",
   dca_reset_paper: "Carteira da acumulação reiniciada",
   dca_sell_profitable: "Lotes no lucro realizados",
+  spot_simple: "Spot ligado",
   manual_buy: "Compra manual",
   close_position: "Posição encerrada",
 };

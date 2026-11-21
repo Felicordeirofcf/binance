@@ -19,7 +19,7 @@ import { avgFillPrice, commissionIn, fmt, roundStep } from "./binance";
 import { baseAsset, PaperBroker, QUOTE, type Broker } from "./broker";
 import type { MarketData } from "./engine";
 import { clientOrderId, type OrderKind } from "./risk";
-import { DCA_DEFAULT, type DcaRow, type DcaState, type Store } from "./store";
+import { DCA_DEFAULT, GRID_EMPTY, type DcaRow, type DcaState, type Store } from "./store";
 import type { Notifier } from "./telegram";
 import type { ExchangeOrder, SymbolFilters } from "./types";
 import { runGrid } from "./grid";
@@ -32,7 +32,7 @@ export type DcaDeps = {
   now?: () => number;
 };
 
-export type DcaAction = { type: "sell_all" } | { type: "sell_partial"; pct: number } | { type: "sell_profitable" };
+export type DcaAction = { type: "sell_all" } | { type: "sell_partial"; pct: number } | { type: "sell_profitable" } | { type: "to_grid" };
 
 export type DcaResult = { status: "ok" | "locked" | "idle"; event: string | null; state: DcaState };
 
@@ -100,6 +100,30 @@ async function runLocked(deps: DcaDeps, action?: DcaAction): Promise<DcaResult> 
   if (!px) throw new Error(`${symbol}: sem preco`);
   paperBroker?.sync(symbol, candles);
   paperBroker?.setPrice(symbol, px);
+
+  // --- converter preco medio -> grade sem vender: a posicao vira o 1o lote ---
+  if (action?.type === "to_grid" && row.mode !== "grid") {
+    const tmp: Ctx = { row, st, store: deps.store, broker, paper, f, price: px, now, notify: deps.notify, events: [] };
+    await reconcile(tmp);
+    await cancelBuy(tmp);
+    await cancelTp(tmp);
+    const s2 = tmp.st;
+    const grid = structuredClone(GRID_EMPTY);
+    grid.realized_pnl = row.grid.realized_pnl;
+    grid.trades = row.grid.trades;
+    if (s2.qty > 0 && s2.qty >= f.minQty) {
+      const avgPx = s2.cost / s2.qty;
+      grid.anchor = roundStep(avgPx, f.tickSize);
+      grid.anchor_time = Math.floor(now() / 60_000) * 60_000;
+      grid.levels = [{ k: 0, price: grid.anchor, buy_cid: null, qty: s2.qty, cost: s2.cost, buy_fill: avgPx, sell_cid: null, sell_price: null }];
+      grid.last_event = `compra do preco medio virou o lote 1 (${avgPx.toFixed(2)})`;
+    }
+    const reset = { ...DCA_DEFAULT.state, realized_pnl: s2.realized_pnl, cycles_done: s2.cycles_done };
+    await deps.store.updateDca({ mode: "grid", grid, state: reset, ...(paperBroker ? { paper_state: paperBroker.snapshot() } : {}) });
+    row.mode = "grid";
+    row.grid = grid;
+    action = undefined;
+  }
 
   // --- modo GRADE: lotes independentes ---
   if (row.mode === "grid") {

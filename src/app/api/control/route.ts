@@ -27,6 +27,7 @@ type Body =
   | { action: "dca_sell_all" }
   | { action: "dca_sell_partial"; pct: number }
   | { action: "dca_sell_profitable" }
+  | { action: "spot_simple"; lot_usdt: number; tp_pct: number; lots: number }
   | { action: "dca_reset_paper" }
   | { action: "binance_check" }
   | { action: "manual_buy"; symbol: string; notionalUsdt: number; stopPct: number; targetPct: number | null; trailing: boolean; side?: "long" | "short"; leverage?: number; confirm: string }
@@ -216,6 +217,21 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, result: await runDca(dcaDeps()) });
       case "dca_sell_all":
         return NextResponse.json({ ok: true, result: await runDca(dcaDeps(), { type: "sell_all" }) });
+      case "spot_simple": {
+        // modo leigo: valor de cada compra + lucro; o resto e calculado (grade simetrica)
+        const lot = Number(body.lot_usdt);
+        const tp = Number(body.tp_pct);
+        const lots = Math.round(Number(body.lots));
+        if (!(lot >= 5 && lot <= 100_000) || !(tp >= 1 && tp <= 10) || !(lots >= 1 && lots <= 20)) {
+          return NextResponse.json({ error: "valores fora do intervalo" }, { status: 400 });
+        }
+        const dca = await store.getDca();
+        if (dca.mode !== "grid") await runDca(dcaDeps(), { type: "to_grid" });
+        await store.updateDca({ mode: "grid", lot_usdt: lot, tp_pct: tp, drop_pct: tp, max_buys: lots, capital_usdt: Math.round(lot * lots * 1.003 * 100) / 100, partial_pct: 100, enabled: true });
+        await store.log("warn", `spot simples: compras de ${lot} USDT, lucro ${tp}% por venda, ate ${lots} compras (grade)`);
+        const r = await runDca(dcaDeps());
+        return NextResponse.json({ ok: true, result: r });
+      }
       case "dca_sell_profitable":
         return NextResponse.json({ ok: true, result: await runDca(dcaDeps(), { type: "sell_profitable" }) });
       case "dca_sell_partial": {

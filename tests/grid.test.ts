@@ -105,4 +105,25 @@ describe("grade spot", () => {
     const open = store.dca.paper_state!.orders.filter((o) => o.status === "NEW");
     expect(open.length).toBe(0);
   });
+
+  it("converter preco medio -> grade: a compra aberta vira o lote 1, sem vender", async () => {
+    const c = path([1000, 995]);
+    const store = new MemoryStore();
+    store.dca = { ...store.dca, mode: "average", enabled: true, capital_usdt: 60, max_buys: 5, drop_pct: 2, tp_pct: 2 };
+    const { deps, at } = harness(store, c);
+    await runDca(deps); // abre ciclo no preco medio
+    const q = store.dca.state.qty;
+    expect(q).toBeGreaterThan(0);
+    at.i = 1;
+    await runDca(deps, { type: "to_grid" });
+    expect(store.dca.mode).toBe("grid");
+    const l0 = store.dca.grid.levels.find((l) => l.k === 0)!;
+    expect(l0.qty).toBeCloseTo(q, 8);
+    expect(l0.sell_price).toBeCloseTo(l0.buy_fill! * 1.02, 1);
+    expect(store.orders.filter((o) => o.side === "SELL" && o.status === "FILLED").length).toBe(0); // nada vendido
+    expect(store.dca.state.qty).toBe(0);
+    // ordens do preco medio canceladas: so as da grade ficam abertas
+    const open = store.dca.paper_state!.orders.filter((o) => o.status === "NEW");
+    expect(open.every((o) => o.clientOrderId.startsWith("tb_g"))).toBe(true);
+  });
 });
